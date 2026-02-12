@@ -13,3 +13,15 @@ class ChatResponse(BaseModel):
     output_tokens: int
     total_tokens: int
     model_name: str
+
+class SessionMessage(BaseModel):
+    role: str # "user" or "assistant"
+    content: str
+    timestamp: str
+
+class ChatSession(BaseModel):
+    id: str
+    patient_id: str
+    title: str = "New Chat"
+    created_at: str
+    messages: List[SessionMessage] = []
