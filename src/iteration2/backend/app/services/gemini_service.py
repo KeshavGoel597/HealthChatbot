@@ -13,22 +13,21 @@ class GeminiService:
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY not found in environment variables")
         
-        # Use Standard Async Client
         self.client = genai.Client(api_key=self.api_key)
-        self.model_name = "gemini-2.5-flash-lite" 
+        self.model_name = "gemini-2.5-flash-lite"
         
     def get_patient_data(self, patient_id: str) -> str:
-        # Load patient data from json file
-        # Assuming data is in iteration2/backend/data
-        # We need to correctly locate the file
-        
-        # Try finding the data file relative to this file
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        base_dir = os.path.dirname(
+            os.path.dirname(
+                os.path.dirname(
+                    os.path.abspath(__file__)
+                )
+            )
+        )
         data_path = os.path.join(base_dir, "data", f"{patient_id}.json")
         
         if not os.path.exists(data_path):
-             # Fallback: check if it's in iteration1 just in case, or default to empty
-             return "{}"
+            return "{}"
 
         try:
             with open(data_path, "r") as f:
@@ -47,7 +46,6 @@ class GeminiService:
         """
         
         try:
-            # Use async client
             response = await self.client.aio.models.generate_content(
                 model=self.model_name,
                 contents=prompt
@@ -57,7 +55,6 @@ class GeminiService:
             print(f"Error extracting data: {e}")
             return "[]"
 
-
     async def chat(self, message: str, patient_id: str = "patient101", history: list = None) -> dict:
         if history is None:
             history = []
@@ -65,12 +62,12 @@ class GeminiService:
         # 1. Load User Context
         raw_data = self.get_patient_data(patient_id)
         
-        # 2. Extract structured data 
+        # 2. Extract structured data
         clinical_context = await self.extract_clinical_data(raw_data)
         if clinical_context == "[]":
-             clinical_context = raw_data 
+            clinical_context = raw_data 
         
-        # 3. Improved System Instruction (guards against toxic positivity)
+        # 3. System Instruction (safe + empathetic)
         system_instruction_text = (
             f"You are Robert, a helpful AI medical assistant for patients. "
             f"Your goal is to explain their medical records to them in simple, easy-to-understand language. "
@@ -85,7 +82,6 @@ class GeminiService:
         )
         
         # 4. Format History for Gemini
-        # Gemini expects roles: "user" and "model". Our DB stores "assistant".
         formatted_contents = []
         
         for msg in history:
@@ -97,7 +93,7 @@ class GeminiService:
                 )
             )
         
-        # Add the current new message at the end
+        # Add current user message
         formatted_contents.append(
             types.Content(
                 role="user",
@@ -115,7 +111,6 @@ class GeminiService:
                 )
             )
             
-            # Extract usage
             usage = response.usage_metadata
             input_tokens = usage.prompt_token_count if usage else 0
             output_tokens = usage.candidates_token_count if usage else 0
@@ -130,7 +125,6 @@ class GeminiService:
             }
         except Exception as e:
             print(f"GenAI Error: {e}")
-            # Try to print more auth info if possible
             return {
                 "response": "Ensure you have the correct API KEY. Error: " + str(e),
                 "input_tokens": 0,

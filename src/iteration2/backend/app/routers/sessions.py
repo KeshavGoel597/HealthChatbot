@@ -4,8 +4,19 @@ from app.routers.chat import gemini_service, get_hf_service
 import os
 import json
 import uuid
+from app.services.sarvam_service import SarvamService
+from app.services.medgemma_service import MedGemmaService
 from datetime import datetime
 from typing import List
+
+sarvam_service = SarvamService()
+
+_medgemma_service = None
+def get_medgemma_service():
+    global _medgemma_service
+    if _medgemma_service is None:
+        _medgemma_service = MedGemmaService()
+    return _medgemma_service
 
 router = APIRouter()
 
@@ -103,11 +114,25 @@ async def send_message(session_id: str, request: ChatMessage):
     try:
         # Determine service
         use_gemini = False
+        use_medgemma = False
         if request.model and request.model.startswith("gemini"):
             use_gemini = True
+        elif request.model and request.model == "medgemma":
+            use_medgemma = True
         elif request.model is None:
             use_gemini = False # Default to HF
             
+        # Translation Logic (Input)
+        target_lang = request.language or "en-IN"
+        llm_input_message = request.message
+        
+        if target_lang != "en-IN":
+            print(f"Translating input from {target_lang} to en-IN...")
+            translated_input = sarvam_service.translate(request.message, target_lang, "en-IN")
+            if translated_input:
+                llm_input_message = translated_input
+                print(f"Translated input: {llm_input_message}")
+
         # Convert session history to list format expected by services
         # (Assuming services accept list of dicts: [{'role': 'user', 'content': '...'}])
         history_for_llm = [
@@ -116,20 +141,49 @@ async def send_message(session_id: str, request: ChatMessage):
                                            # Usually services expect history + current message separate
         ]
         
+        # NOTE: We are passing the original history (which might be in mixed languages)
+        # and the potentially translated *current* message (in English) to the LLM.
+        # This is a compromise. Ideally we'd translate history too.
+        
         if use_gemini:
-            result = await gemini_service.chat(request.message, session.patient_id, history=history_for_llm)
+            result = await gemini_service.chat(llm_input_message, session.patient_id, history=history_for_llm)
+        elif use_medgemma:
+            service = get_medgemma_service()
+            result = await service.chat(llm_input_message, session.patient_id, history=history_for_llm)
         else:
             service = get_hf_service()
-            result = await service.chat(request.message, session.patient_id, history=history_for_llm)
+            result = await service.chat(llm_input_message, session.patient_id, history=history_for_llm)
             
-        # 4. Add assistant message
+        # Translation Logic (Output)
+        final_response_text = result["response"]
+        audio_content = None
+        
+        if target_lang != "en-IN":
+             print(f"Translating response to {target_lang}...")
+             translated_response = sarvam_service.translate(final_response_text, "en-IN", target_lang)
+             if translated_response:
+                 final_response_text = translated_response
+        
+        # TTS Logic
+        if request.audio_requested:
+            print(f"Generating audio for {target_lang}...")
+            # Use the final language code (Sarvam handles various indic codes)
+            audio_content = sarvam_service.text_to_speech(final_response_text, target_lang)
+
+        # 4. Add assistant message (Save the final displayed text)
         assistant_msg = SessionMessage(
             role="assistant",
-            content=result["response"],
+            content=final_response_text,
             timestamp=datetime.now().isoformat()
         )
         session.messages.append(assistant_msg)
         _save_session(session)
+        
+        # Update result with final details
+        result["response"] = final_response_text
+        result["language"] = target_lang
+        result["audio_content"] = audio_content
+        print(f"DEBUG: audio_content present: {audio_content is not None}, length: {len(audio_content) if audio_content else 0}")
         
         return ChatResponse(**result)
         
