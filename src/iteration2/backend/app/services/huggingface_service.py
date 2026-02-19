@@ -21,7 +21,6 @@ class HuggingFaceService:
         """
         summary = []
 
-        # 1. Demographics
         age_match = re.search(r'age: "([^"]+)"', raw_data)
         sex_match = re.search(r'sex: "([^"]+)"', raw_data)
         if age_match or sex_match:
@@ -29,7 +28,6 @@ class HuggingFaceService:
             sex = sex_match.group(1) if sex_match else "?"
             summary.append(f"PATIENT: Age {age}, Sex {sex}")
 
-        # 2. Diagnoses
         diagnoses = set(re.findall(r'"diag" => "([^"]+)"', raw_data))
         cleaned_diagnoses = [
             d.strip() for d in diagnoses if d.strip() and d.strip() != "@10"
@@ -37,7 +35,6 @@ class HuggingFaceService:
         if cleaned_diagnoses:
             summary.append(f"DIAGNOSES: {', '.join(cleaned_diagnoses)}")
 
-        # 3. Symptoms
         symptoms = set(re.findall(r'"sym" => "([^"]+)"', raw_data))
         cleaned_symptoms = [
             s.strip() for s in symptoms if s.strip() and s.strip() != "FCU"
@@ -45,12 +42,10 @@ class HuggingFaceService:
         if cleaned_symptoms:
             summary.append(f"SYMPTOMS: {', '.join(cleaned_symptoms)}")
 
-        # 4. Medications
         meds = set(re.findall(r'"medicine" => "([^"]+)"', raw_data))
         if meds:
             summary.append(f"MEDICATIONS: {', '.join(list(meds)[:10])}...")
 
-        # 5. Recent Labs
         lab_summary = []
         for lab in ["Hemoglobin", "RBS", "Total WBC Count", "Platelet Count"]:
             matches = re.findall(
@@ -107,24 +102,6 @@ class HuggingFaceService:
         new_tokens = outputs[0][inputs.input_ids.shape[1]:]
         return self.tokenizer.decode(new_tokens, skip_special_tokens=True)
 
-    async def extract_clinical_data(self, raw_text: str) -> str:
-        prompt = f"""<start_of_turn>user
-Act as a Clinical Coder.
-TASK: Extract Diagnosis, Meds, Labs, Symptoms from the text below.
-CRITICAL: Keep Dates. Map to SNOMED IDs.
-RAW DATA: {raw_text}
-OUTPUT: Valid JSON List.<end_of_turn>
-<start_of_turn>model
-"""
-
-        loop = asyncio.get_event_loop()
-        response_text = await loop.run_in_executor(None, self._generate, prompt)
-
-        if "<start_of_turn>model" in response_text:
-            response_text = response_text.split("<start_of_turn>model")[-1].strip()
-
-        return response_text.replace("```json", "").replace("```", "").strip()
-
     async def chat(self, message: str, patient_id: str = "patient101", history: list = None) -> dict:
         if history is None:
             history = []
@@ -133,7 +110,6 @@ OUTPUT: Valid JSON List.<end_of_turn>
         raw_data = self.get_patient_data(patient_id)
 
         clinical_summary = self._summarize_context(raw_data)
-        print(f"DEBUG: Clinical summary for {patient_id}: {clinical_summary[:200]}")
 
         messages = [
             {
@@ -151,18 +127,14 @@ OUTPUT: Valid JSON List.<end_of_turn>
             }
         ]
 
-        # Insert conversation history
         for msg in history:
             messages.append({"role": msg["role"], "content": msg["content"]})
 
-        # Add current user message
         messages.append({"role": "user", "content": message})
 
         prompt = self.tokenizer.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True
         )
-
-        print(f"Generating for model {self.model_name} with prompt length: {len(prompt)}")
 
         loop = asyncio.get_event_loop()
         response_text = await loop.run_in_executor(None, self._generate, prompt)
