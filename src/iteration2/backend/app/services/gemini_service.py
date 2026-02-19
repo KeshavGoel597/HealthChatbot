@@ -58,7 +58,9 @@ class GeminiService:
             return "[]"
 
 
-    async def chat(self, message: str, patient_id: str = "patient101", history: list = []) -> dict:
+    async def chat(self, message: str, patient_id: str = "patient101", history: list = None) -> dict:
+        if history is None:
+            history = []
         
         # 1. Load User Context
         raw_data = self.get_patient_data(patient_id)
@@ -68,21 +70,48 @@ class GeminiService:
         if clinical_context == "[]":
              clinical_context = raw_data 
         
+        # 3. Improved System Instruction (guards against toxic positivity)
         system_instruction_text = (
             f"You are Robert, a helpful AI medical assistant for patients. "
             f"Your goal is to explain their medical records to them in simple, easy-to-understand language. "
-            f"Avoid medical jargon where possible, or explain it if necessary. "
-            f"Always be empathetic and clear. "
-            f"Context from their Electronic Medical Records (EMR): {clinical_context}"
+            f"CONTEXT: The patient's EMR data is: {clinical_context}\n"
+            f"GUIDELINES:\n"
+            f"- Avoid medical jargon where possible, or explain it if necessary.\n"
+            f"- TONE: Be empathetic, professional, and calm. NEVER congratulate a user on symptoms or sickness "
+            f"(e.g., do not say 'It's great you have a cold').\n"
+            f"- If the user shares negative symptoms, acknowledge them with concern "
+            f"(e.g., 'I am sorry to hear that'), not excitement.\n"
+            f"- Base your answers strictly on the provided EMR context and general medical knowledge."
+        )
+        
+        # 4. Format History for Gemini
+        # Gemini expects roles: "user" and "model". Our DB stores "assistant".
+        formatted_contents = []
+        
+        for msg in history:
+            role = "model" if msg["role"] == "assistant" else "user"
+            formatted_contents.append(
+                types.Content(
+                    role=role,
+                    parts=[types.Part(text=msg["content"])]
+                )
+            )
+        
+        # Add the current new message at the end
+        formatted_contents.append(
+            types.Content(
+                role="user",
+                parts=[types.Part(text=message)]
+            )
         )
         
         try:
-           
             response = await self.client.aio.models.generate_content(
                 model=self.model_name,
-                contents=message,
+                contents=formatted_contents,
                 config=types.GenerateContentConfig(
-                    system_instruction=system_instruction_text
+                    system_instruction=system_instruction_text,
+                    temperature=0.7
                 )
             )
             

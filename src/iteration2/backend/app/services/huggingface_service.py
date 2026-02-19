@@ -131,7 +131,9 @@ OUTPUT: Valid JSON List.<end_of_turn>
             
         return response_text.replace("```json", "").replace("```", "").strip()
 
-    async def chat(self, message: str, patient_id: str = "patient101", history: list = []) -> dict:
+    async def chat(self, message: str, patient_id: str = "patient101", history: list = None) -> dict:
+        if history is None:
+            history = []
         self._load_model()
         raw_data = self.get_patient_data(patient_id)
         
@@ -153,12 +155,22 @@ OUTPUT: Valid JSON List.<end_of_turn>
                 "content": (
                     "You are Robert, a helpful medical assistant for patients. "
                     "Use the provided patient summary to answer questions. "
-                    "Be brief and empathetic. "
+                    "Be empathetic, professional, and calm. "
+                    "NEVER congratulate a user on symptoms or sickness "
+                    "(e.g., do not say 'It's great you have a cold'). "
+                    "If the user shares negative symptoms, acknowledge them with concern "
+                    "(e.g., 'I am sorry to hear that'), not excitement. "
                     f"PATIENT SUMMARY:\n{clinical_summary}"
                 )
             },
-            {"role": "user", "content": message}
         ]
+        
+        # Insert conversation history
+        for msg in history:
+            messages.append({"role": msg["role"], "content": msg["content"]})
+        
+        # Add the current user message
+        messages.append({"role": "user", "content": message})
         
         # Use apply_chat_template for correct formatting for any model (Gemma, Qwen, etc.)
         prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
