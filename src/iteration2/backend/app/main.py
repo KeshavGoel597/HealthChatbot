@@ -3,14 +3,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import os
 from app.routers import chat, sessions
+from app.routers import gdpr_router
+from app.routers.sessions import run_retention_cleanup
 
 # Load environment variables
 load_dotenv()
 
 app = FastAPI(
-    title="Gemini Medical Chatbot Backend",
-    description="Backend for the Gemini Medical Chatbot (Iteration 2)",
-    version="0.2.0"
+    title="Robert — AI Medical Assistant Backend",
+    description=(
+        "Backend for the Robert AI Medical Assistant (Iteration 2). "
+        "GDPR-compliant: implements Art. 5, 15, 16, 17, and 22 of the GDPR."
+    ),
+    version="0.3.0"
 )
 
 # CORS Configuration
@@ -31,10 +36,28 @@ app.add_middleware(
 # Include Routers
 app.include_router(chat.router)
 app.include_router(sessions.router)
+app.include_router(gdpr_router.router)  # GDPR endpoints: /gdpr/...
+
+
+@app.on_event("startup")
+async def startup_event():
+    """
+    GDPR Art. 5(1)(e) — Storage Limitation.
+    On every backend startup, scan all stored sessions and delete those
+    that have passed their expires_at retention deadline (default: 30 days).
+    """
+    print("[STARTUP] Running GDPR retention cleanup...")
+    run_retention_cleanup()
+
 
 @app.get("/")
 async def root():
-    return {"message": "Gemini Medical Chatbot Backend verified running"}
+    return {
+        "message": "Robert AI Medical Assistant Backend — running",
+        "gdpr_compliance": "Art. 5, 15, 16, 17, 22",
+        "context_compaction": "enabled"
+    }
+
 
 if __name__ == "__main__":
     import uvicorn
