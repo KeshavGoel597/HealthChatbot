@@ -1,0 +1,74 @@
+from fastapi import APIRouter, HTTPException, Request
+from app.models.chat_models import ChatMessage, ChatResponse
+from app.services.gemini_service import GeminiService
+from app.services.huggingface_service import HuggingFaceService
+from app.services.rag.pipeline import run_pipeline
+
+router = APIRouter()
+gemini_service = GeminiService()
+# Lazy init for HF service to avoid loading 8GB on startup if not used
+hf_service = None
+
+def get_hf_service():
+    global hf_service
+    if hf_service is None:
+        hf_service = HuggingFaceService()
+    return hf_service
+
+
+def _get_emr_path(patient_id: str) -> str:
+    """Resolve patient EMR file path."""
+    import os
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(base_dir, "data", f"{patient_id}.json")
+
+
+@router.post("/chat", response_model=ChatResponse)
+async def chat_endpoint(request: ChatMessage, req: Request):
+    try:
+        # Run RAG pipeline to get focused clinical context
+        index = req.app.state.embedding_index
+        graph = req.app.state.knowledge_graph
+        extractor = req.app.state.term_extractor
+        emr_path = _get_emr_path(request.patient_id)
+
+        result = run_pipeline(
+            query=request.message,
+            emr_path=emr_path,
+            index=index,
+            graph=graph,
+            patient_id=request.patient_id,
+            extractor=extractor,
+        )
+        system_prompt = result.system_prompt
+
+        # Route to LLM service
+        use_gemini = False
+        if request.model and request.model.startswith("gemini"):
+            use_gemini = True
+        elif request.model is None:
+            use_gemini = False  # Default to HF
+
+        if use_gemini:
+            llm_result = await gemini_service.chat(
+                request.message, request.patient_id,
+                system_prompt=system_prompt,
+            )
+        else:
+            service = get_hf_service()
+            llm_result = await service.chat(
+                request.message, request.patient_id,
+                system_prompt=system_prompt,
+            )
+
+        return ChatResponse(**llm_result)
+    except RuntimeError as e:
+        if "Hugging Face" in str(e):
+            raise HTTPException(status_code=403, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/health")
+async def health_check():
+    return {"status": "ok"}
