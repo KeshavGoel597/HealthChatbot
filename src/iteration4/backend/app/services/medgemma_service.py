@@ -1,20 +1,15 @@
 """
-HuggingFaceService — GDPR-compliant, RAG-enhanced, context-compaction-aware
-=============================================================================
-Uses deterministic compaction (no extra LLM call) since Qwen-0.5B is too
-small to reliably self-summarise clinical conversations.
-
-RAG Integration:
-  When a system_prompt is provided (from the RAG pipeline), it is used as the
-  primary system content. Otherwise falls back to regex-based EMR summary.
+MedGemmaService — GDPR-compliant, context-compaction-aware
+===========================================================
+Uses deterministic compaction (no extra model call) since we run on local hardware.
 """
 
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoProcessor, AutoModelForImageTextToText
 import os
 import asyncio
-from dotenv import load_dotenv
 import re
+from dotenv import load_dotenv
 
 from app.services.context_compaction import (
     build_llm_history,
@@ -36,17 +31,16 @@ GDPR_SYSTEM_SUFFIX = (
 )
 
 
-class HuggingFaceService:
+class MedGemmaService:
+    """Service for Google MedGemma 4B medical model."""
+
     def __init__(self):
-        self.model_name = "Qwen/Qwen2-0.5B-Instruct"
-        self.tokenizer = None
+        self.model_name = "google/medgemma-1.5-4b-it"
+        self.processor = None
         self.model = None
 
     def _summarize_emr_context(self, raw_data: str) -> tuple[str, list]:
-        """
-        Extracts key clinical information from the raw EMR string.
-        Returns (summary_text, list_of_field_names_used) for GDPR Art. 15.
-        """
+        """Extract key clinical info and return (summary, fields_used) for GDPR Art. 15."""
         summary = []
         fields_used = []
 
@@ -72,14 +66,13 @@ class HuggingFaceService:
 
         meds = set(re.findall(r'"medicine" => "([^"]+)"', raw_data))
         if meds:
-            summary.append(f"MEDICATIONS: {', '.join(list(meds)[:10])}...")
+            summary.append(f"MEDICATIONS: {', '.join(list(meds)[:10])}")
             fields_used.append("Prescribed Medications")
 
         lab_summary = []
         for lab in ["Hemoglobin", "RBS", "Total WBC Count", "Platelet Count"]:
             matches = re.findall(
-                f'"name" => "{lab}", "value" => "([^"]+)", "date" => "([^"]+)"',
-                raw_data,
+                f'"name" => "{lab}", "value" => "([^"]+)", "date" => "([^"]+)"', raw_data
             )
             if matches:
                 last_val, last_date = matches[-1]
@@ -92,19 +85,20 @@ class HuggingFaceService:
 
     def _load_model(self):
         if self.model is None:
-            print(f"Loading {self.model_name}...")
+            print(f"Loading MedGemma ({self.model_name})...")
             try:
-                self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-                self.model = AutoModelForCausalLM.from_pretrained(
+                self.processor = AutoProcessor.from_pretrained(self.model_name)
+                self.model = AutoModelForImageTextToText.from_pretrained(
                     self.model_name,
                     device_map="auto",
-                    torch_dtype=torch.float16,
+                    torch_dtype=torch.bfloat16
                 )
-                print(f"{self.model_name} loaded.")
+                print("MedGemma loaded successfully.")
             except Exception as e:
+                print(f"Failed to load MedGemma: {e}")
                 raise RuntimeError(
-                    f"Failed to load model '{self.model_name}'. "
-                    f"Ensure you are authenticated with Hugging Face. Error: {str(e)}"
+                    f"Failed to load MedGemma. Ensure you have HuggingFace access "
+                    f"to this gated model (huggingface-cli login). Error: {e}"
                 )
 
     def get_patient_data(self, patient_id: str) -> str:
@@ -121,12 +115,22 @@ class HuggingFaceService:
             print(f"Error reading patient data: {e}")
             return "{}"
 
-    def _generate(self, prompt: str, max_new_tokens: int = 512) -> str:
-        self._load_model()
-        inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
+    def _generate(self, messages: list, max_new_tokens: int = 512) -> str:
+        """Generate text using MedGemma's processor and model."""
+        inputs = self.processor.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            tokenize=True,
+            return_dict=True,
+            return_tensors="pt",
+        ).to(self.model.device)
+
         outputs = self.model.generate(**inputs, max_new_tokens=max_new_tokens)
-        new_tokens = outputs[0][inputs.input_ids.shape[1]:]
-        return self.tokenizer.decode(new_tokens, skip_special_tokens=True)
+        response = self.processor.decode(
+            outputs[0][inputs["input_ids"].shape[-1]:],
+            skip_special_tokens=True
+        )
+        return response.strip()
 
     async def chat(
         self,
@@ -135,8 +139,6 @@ class HuggingFaceService:
         history: list = None,
         compacted_summary: str = None,
         emr_consent: bool = False,
-        *,
-        system_prompt: str = "",
     ) -> dict:
         if history is None:
             history = []
@@ -144,14 +146,26 @@ class HuggingFaceService:
         self._load_model()
 
         emr_fields_used = []
-        clinical_summary = ""
+        clinical_summary_str = ""
 
-        # --- Deterministic compaction (GDPR Art. 5(1)(c)) ---
+        # GDPR Art. 5(1)(a,c) — EMR access only with explicit consent
+        if emr_consent:
+            raw_data = self.get_patient_data(patient_id)
+            clinical_summary_str, emr_fields_used = self._summarize_emr_context(raw_data)
+            emr_section = f"PATIENT MEDICAL RECORDS (consented, read-only):\n{clinical_summary_str}"
+        else:
+            emr_section = (
+                "EMR ACCESS: Patient has NOT consented to EMR access. "
+                "Do NOT reference any specific medical records. "
+                "Provide only general medical guidance."
+            )
+
+        # --- Deterministic compaction ---
         was_compacted = False
         new_compacted_summary = compacted_summary
 
         if needs_compaction(history):
-            print(f"[COMPACTION] Running deterministic compaction for HF model...")
+            print(f"[COMPACTION] Running deterministic compaction for MedGemma...")
             old_turns, _ = split_for_compaction(history)
             new_summary = compact_deterministic(old_turns)
             if compacted_summary:
@@ -164,52 +178,46 @@ class HuggingFaceService:
         # Build windowed history
         history_for_llm = build_llm_history(history, new_compacted_summary)
 
-        # --- Build system content ---
-        if system_prompt:
-            # RAG pipeline provided focused clinical context
-            emr_section = system_prompt
-            emr_fields_used = ["RAG Pipeline (SNOMED Knowledge Graph)"]
-        elif emr_consent:
-            # No RAG prompt but consent given — fall back to regex-based EMR summary
-            raw_data = self.get_patient_data(patient_id)
-            clinical_summary, emr_fields_used = self._summarize_emr_context(raw_data)
-            emr_section = f"PATIENT SUMMARY (consented, read-only):\n{clinical_summary}"
-        else:
-            emr_section = (
-                "EMR ACCESS: Patient has NOT consented to EMR access. "
-                "Do NOT reference any specific medical records. "
-                "Provide only general medical guidance."
-            )
-
         system_content = (
-            "You are Robert, a helpful AI medical assistant for patients.\n"
-            "You are NOT a licensed physician.\n"
-            f"{emr_section}\n"
-            "Be empathetic, professional, and calm.\n"
-            "NEVER congratulate a user on symptoms or illness.\n"
-            "If the user shares negative symptoms, acknowledge them with concern.\n"
-            "If the user mentions incorrect records, tell them to contact their "
-            "healthcare provider — you cannot modify medical records.\n"
+            "You are Robert, a warm and helpful AI medical assistant. You are NOT a licensed physician.\n\n"
+            f"{emr_section}\n\n"
+            "Your responsibilities:\n"
+            "1. Directly address the patient's current question or complaint.\n"
+            "2. Relate it to their medical background when relevant (and consented).\n"
+            "3. If the symptom is new, provide helpful general medical guidance.\n"
+            "4. Be empathetic, concise (2-3 paragraphs).\n"
+            "5. If the patient mentions incorrect records, say: 'Please contact your healthcare "
+            "provider or system administrator to correct your records — I cannot modify them.'\n"
             f"{GDPR_SYSTEM_SUFFIX}"
         )
 
-        messages = [{"role": "system", "content": system_content}]
+        # MedGemma uses a specific message format
+        messages_for_model = []
+        # Inject system content into the first user message (MedGemma's format)
+        first_user_content = f"{system_content}\n\n"
 
-        for msg in history_for_llm:
-            messages.append({"role": msg["role"], "content": msg["content"]})
+        # Prepend compacted history as a text block if present
+        if history_for_llm:
+            history_text = "\n".join(
+                [f"{'Patient' if m['role'] == 'user' else 'Robert'}: {m['content']}"
+                 for m in history_for_llm]
+            )
+            first_user_content += f"[PRIOR CONVERSATION]\n{history_text}\n\n"
 
-        messages.append({"role": "user", "content": message})
+        first_user_content += f"Patient says: {message}"
 
-        prompt = self.tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
-        )
+        messages_for_model = [
+            {"role": "user", "content": [{"type": "text", "text": first_user_content}]}
+        ]
 
-        print(f"Generating for model {self.model_name} with prompt length: {len(prompt)}")
+        print("MedGemma: Generating response...")
         loop = asyncio.get_event_loop()
-        response_text = await loop.run_in_executor(None, self._generate, prompt)
+        response_text = await loop.run_in_executor(None, self._generate, messages_for_model)
 
-        input_tokens = len(self.tokenizer.encode(prompt))
-        output_tokens = len(self.tokenizer.encode(response_text))
+        # Token counting (approximate for local model)
+        input_text = system_content + message
+        input_tokens = len(input_text.split()) * 2
+        output_tokens = len(response_text.split()) * 2
 
         return {
             "response": response_text,

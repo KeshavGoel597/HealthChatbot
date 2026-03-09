@@ -26,21 +26,24 @@ def _get_emr_path(patient_id: str) -> str:
 @router.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatMessage, req: Request):
     try:
-        # Run RAG pipeline to get focused clinical context
-        index = req.app.state.embedding_index
-        graph = req.app.state.knowledge_graph
-        extractor = req.app.state.term_extractor
-        emr_path = _get_emr_path(request.patient_id)
+        # GDPR Art. 5(1)(a) — only run RAG / load EMR if patient has given consent
+        system_prompt = ""
+        if request.emr_consent and getattr(req.app.state, "embedding_index", None):
+            # Run RAG pipeline to get focused clinical context
+            index = req.app.state.embedding_index
+            graph = req.app.state.knowledge_graph
+            extractor = getattr(req.app.state, "term_extractor", None)
+            emr_path = _get_emr_path(request.patient_id)
 
-        result = run_pipeline(
-            query=request.message,
-            emr_path=emr_path,
-            index=index,
-            graph=graph,
-            patient_id=request.patient_id,
-            extractor=extractor,
-        )
-        system_prompt = result.system_prompt
+            result = run_pipeline(
+                query=request.message,
+                emr_path=emr_path,
+                index=index,
+                graph=graph,
+                patient_id=request.patient_id,
+                extractor=extractor,
+            )
+            system_prompt = result.system_prompt
 
         # Route to LLM service
         use_gemini = False
@@ -53,12 +56,14 @@ async def chat_endpoint(request: ChatMessage, req: Request):
             llm_result = await gemini_service.chat(
                 request.message, request.patient_id,
                 system_prompt=system_prompt,
+                emr_consent=request.emr_consent,
             )
         else:
             service = get_hf_service()
             llm_result = await service.chat(
                 request.message, request.patient_id,
                 system_prompt=system_prompt,
+                emr_consent=request.emr_consent,
             )
 
         return ChatResponse(**llm_result)
