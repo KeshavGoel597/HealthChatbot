@@ -1,10 +1,16 @@
 "use client"
 
 import * as React from "react"
-import { MessageSquare, Plus, Trash2 } from "lucide-react"
+import { MessageSquare, Plus, MoreVertical, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu"
 
 interface ChatSession {
   id: string
@@ -97,21 +103,33 @@ export function ChatSidebar({
                   </div>
                 </Button>
 
-                {/* GDPR Art. 17 — Right to Erasure: delete button per session */}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 shrink-0 text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10 transition-colors"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    if (confirm("Delete this chat? This action cannot be undone (GDPR Art. 17 — Right to Erasure).")) {
-                      onDeleteSession(session.id)
-                    }
-                  }}
-                  title="Delete this chat (GDPR Art. 17)"
-                >
-                  <Trash2 size={12} />
-                </Button>
+                {/* GDPR Art. 17 — Right to Erasure: three-dot menu with delete option */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                      onClick={(e) => e.stopPropagation()}
+                      title="Chat options"
+                    >
+                      <MoreVertical size={14} />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-40">
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onClick={() => {
+                        if (confirm("Delete this chat? This action cannot be undone (GDPR Art. 17 — Right to Erasure).")) {
+                          onDeleteSession(session.id)
+                        }
+                      }}
+                    >
+                      <Trash2 size={14} className="mr-2" />
+                      Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             )
           })}

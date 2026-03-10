@@ -215,7 +215,7 @@ async def send_message(session_id: str, request: ChatMessage, req: Request):
 
     # 2. Run RAG pipeline for focused context (only if EMR consent given)
     system_prompt = ""
-    if effective_emr_consent and getattr(req.app.state, "embedding_index", None):
+    if effective_emr_consent:
         try:
             index = req.app.state.embedding_index
             graph = req.app.state.knowledge_graph

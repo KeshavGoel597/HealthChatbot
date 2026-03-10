@@ -28,11 +28,11 @@ async def chat_endpoint(request: ChatMessage, req: Request):
     try:
         # GDPR Art. 5(1)(a) — only run RAG / load EMR if patient has given consent
         system_prompt = ""
-        if request.emr_consent and getattr(req.app.state, "embedding_index", None):
+        if request.emr_consent:
             # Run RAG pipeline to get focused clinical context
             index = req.app.state.embedding_index
             graph = req.app.state.knowledge_graph
-            extractor = getattr(req.app.state, "term_extractor", None)
+            extractor = req.app.state.term_extractor
             emr_path = _get_emr_path(request.patient_id)
 
             result = run_pipeline(
