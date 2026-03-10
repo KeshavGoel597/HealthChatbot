@@ -23,6 +23,9 @@ from app.models.chat_models import (
 )
 from app.routers.chat import gemini_service, get_hf_service, _get_emr_path
 from app.services.rag.pipeline import run_pipeline
+from app.services.session_store import (
+    SESSIONS_DIR, get_session_path, load_session, save_session,
+)
 import os
 import json
 import uuid
@@ -43,33 +46,10 @@ def get_medgemma_service():
 
 router = APIRouter()
 
-# Data storage path
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-SESSIONS_DIR = os.path.join(BASE_DIR, "data", "sessions")
-os.makedirs(SESSIONS_DIR, exist_ok=True)
-
-
-def _get_session_path(session_id: str) -> str:
-    return os.path.join(SESSIONS_DIR, f"{session_id}.json")
-
-
-def _load_session(session_id: str) -> Optional[ChatSession]:
-    path = _get_session_path(session_id)
-    if not os.path.exists(path):
-        return None
-    try:
-        with open(path, "r") as f:
-            data = json.load(f)
-            return ChatSession(**data)
-    except Exception as e:
-        print(f"Error loading session {session_id}: {e}")
-        return None
-
-
-def _save_session(session: ChatSession):
-    path = _get_session_path(session.id)
-    with open(path, "w") as f:
-        json.dump(session.dict(), f, indent=2)
+# Aliases for backward compatibility within this module
+_get_session_path = get_session_path
+_load_session = load_session
+_save_session = save_session
 
 
 def run_retention_cleanup():
@@ -235,6 +215,10 @@ async def send_message(session_id: str, request: ChatMessage, req: Request):
             print(f"RAG pipeline error: {e}")
             system_prompt = ""
 
+    print("=== SYSTEM PROMPT SENT TO LLM ===", flush=True)
+    print(system_prompt if system_prompt else "(empty — no consent or no EMR)", flush=True)
+    print("=== END SYSTEM PROMPT ===", flush=True)
+
     # 3. Call LLM
     try:
         use_gemini = False
@@ -278,6 +262,7 @@ async def send_message(session_id: str, request: ChatMessage, req: Request):
                 history=raw_history_for_llm,
                 compacted_summary=session.compacted_summary,
                 emr_consent=effective_emr_consent,
+                system_prompt=system_prompt,
             )
         else:
             service = get_hf_service()

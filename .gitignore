@@ -11,3 +11,8 @@ venv/
 # --- OS Specific ---
 .DS_Store
 Thumbs.db
+
+CUI_Vocab.json
+GraphModel_SNOMED_CUI_Embedding.pkl
+sm_t047_cui_aui_eng.pkl
+SNOMED_CUI_MAJID_Graph_wSelf.pkl

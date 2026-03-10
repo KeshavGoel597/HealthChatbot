@@ -109,7 +109,7 @@ export function ChatSidebar({
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-7 w-7 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                      className="h-7 w-7 shrink-0 text-muted-foreground/40 hover:text-foreground transition-colors"
                       onClick={(e) => e.stopPropagation()}
                       title="Chat options"
                     >
@@ -160,7 +160,7 @@ export function ChatSidebar({
       <div
         className={cn(
           "hidden border-r bg-muted/10 md:flex md:flex-col transition-all duration-300 ease-in-out",
-          isOpen ? "w-64 translate-x-0" : "w-0 -translate-x-full opacity-0 overflow-hidden",
+          isOpen ? "w-80 translate-x-0" : "w-0 -translate-x-full opacity-0 overflow-hidden",
           className
         )}
       >

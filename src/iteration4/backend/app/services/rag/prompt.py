@@ -140,9 +140,17 @@ def assemble_prompt(
 
     return (
         f"{base}\n\n"
-        f"Relevant clinical context{patient_label}:\n"
-        f"{context}\n\n"
-        "Use ONLY the clinical context above to answer the patient's "
-        "question. If the context does not contain enough information "
-        "to answer, say so honestly rather than guessing."
+        f"=== PATIENT CLINICAL RECORD{patient_label.upper()} ===\n"
+        f"{context}\n"
+        f"=== END CLINICAL RECORD ===\n\n"
+        "IMPORTANT: The clinical record above is the patient's actual medical data. "
+        "Always ground your response in these records first — reference specific "
+        "diagnoses, medications, lab values, or symptoms from the record when they "
+        "are relevant to the question. "
+        "If the records contain information that answers the patient's question, "
+        "lead with that information and explain it clearly.\n\n"
+        "If the clinical record does not cover the patient's question, you must"
+        "supplement with general medical knowledge. THIS IS VERY IMPORTANT. You must at least answer the question"
+        "but clearly indicate when you"
+        "are doing so and advise the patient to consult their doctor for specifics."
     )

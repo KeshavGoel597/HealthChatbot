@@ -14,37 +14,18 @@ import os
 import json
 from fastapi import APIRouter, HTTPException
 from app.models.chat_models import GDPRConsentUpdate, ChatSession
+from app.services.session_store import (
+    SESSIONS_DIR, get_session_path, load_session, save_session,
+)
 from typing import List
 from datetime import datetime
 
 router = APIRouter(prefix="/gdpr", tags=["GDPR"])
 
-# Resolve sessions directory (same as sessions.py)
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-SESSIONS_DIR = os.path.join(BASE_DIR, "data", "sessions")
-
-
-def _get_session_path(session_id: str) -> str:
-    return os.path.join(SESSIONS_DIR, f"{session_id}.json")
-
-
-def _load_session(session_id: str):
-    path = _get_session_path(session_id)
-    if not os.path.exists(path):
-        return None
-    try:
-        with open(path, "r") as f:
-            data = json.load(f)
-            return ChatSession(**data)
-    except Exception as e:
-        print(f"Error loading session {session_id}: {e}")
-        return None
-
-
-def _save_session(session: ChatSession):
-    path = _get_session_path(session.id)
-    with open(path, "w") as f:
-        json.dump(session.dict(), f, indent=2)
+# Aliases for local readability
+_get_session_path = get_session_path
+_load_session = load_session
+_save_session = save_session
 
 
 # ---------------------------------------------------------------------------

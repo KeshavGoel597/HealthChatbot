@@ -1,8 +1,12 @@
+import logging
+
 from fastapi import APIRouter, HTTPException, Request
 from app.models.chat_models import ChatMessage, ChatResponse
 from app.services.gemini_service import GeminiService
 from app.services.huggingface_service import HuggingFaceService
 from app.services.rag.pipeline import run_pipeline
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 gemini_service = GeminiService()
@@ -26,6 +30,7 @@ def _get_emr_path(patient_id: str) -> str:
 @router.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatMessage, req: Request):
     try:
+        print(f"[CHAT] Received request: model={request.model}, patient={request.patient_id}, consent={request.emr_consent}", flush=True)
         # GDPR Art. 5(1)(a) — only run RAG / load EMR if patient has given consent
         system_prompt = ""
         if request.emr_consent:
@@ -44,6 +49,10 @@ async def chat_endpoint(request: ChatMessage, req: Request):
                 extractor=extractor,
             )
             system_prompt = result.system_prompt
+
+        print("=== SYSTEM PROMPT SENT TO LLM ===", flush=True)
+        print(system_prompt if system_prompt else "(empty — no consent or no EMR)", flush=True)
+        print("=== END SYSTEM PROMPT ===", flush=True)
 
         # Route to LLM service
         use_gemini = False

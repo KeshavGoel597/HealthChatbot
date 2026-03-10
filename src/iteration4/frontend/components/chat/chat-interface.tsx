@@ -17,6 +17,7 @@ import {
 import { ModeToggle } from "@/components/mode-toggle"
 import { ChatSidebar } from "@/components/chat/chat-sidebar"
 import { ConsentModal } from "@/components/chat/consent-modal"
+import ReactMarkdown from 'react-markdown'
 
 const BACKEND_URL = 'http://localhost:8013'
 
@@ -168,6 +169,7 @@ export function ChatInterface() {
     setIsLoading(true)
 
     try {
+      const isNewSession = !currentSessionId
       let sessionId = currentSessionId
 
       // If no session, create one with the current consent settings
@@ -227,7 +229,7 @@ export function ChatInterface() {
       }
       setMessages(prev => [...prev, assistantMessage])
 
-      if (messages.length <= 1) {
+      if (isNewSession) {
         fetchSessions()
       }
 
@@ -285,7 +287,6 @@ export function ChatInterface() {
 
             <div className="relative hidden md:block">
               <Avatar className="h-9 w-9 border">
-                <AvatarImage src="/bot-avatar.png" />
                 <AvatarFallback className="bg-primary/10 text-primary"><Bot size={18} /></AvatarFallback>
               </Avatar>
               <span className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-background ${model === "gemini-2.5-flash-lite" ? 'bg-blue-500' : model === "medgemma" ? 'bg-purple-500' : 'bg-green-500'}`}></span>
@@ -374,7 +375,13 @@ export function ChatInterface() {
                       ? 'bg-primary text-primary-foreground rounded-tr-sm'
                       : 'bg-muted/50 text-foreground border rounded-tl-sm'
                       }`}>
-                      <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
+                      {m.role === 'user' ? (
+                        <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
+                      ) : (
+                        <div className="prose prose-sm dark:prose-invert max-w-none leading-relaxed [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+                          <ReactMarkdown>{m.content}</ReactMarkdown>
+                        </div>
+                      )}
 
                       {/* Audio player */}
                       {m.audio_content && (

@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+google-genai
+torch
+transformers
+accelerate
+faiss-cpu
+networkx
+numpy
+requests
+pydantic
