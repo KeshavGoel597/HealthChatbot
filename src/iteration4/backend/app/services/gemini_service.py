@@ -15,6 +15,7 @@ RAG Integration:
 import os
 import json
 import asyncio
+import logging
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
@@ -26,6 +27,8 @@ from app.services.context_compaction import (
 )
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 # GDPR Art. 5(1)(a) + Art. 22 — mandatory disclaimer injected into every response prompt
 GDPR_RESPONSE_DISCLAIMER = (
@@ -61,12 +64,11 @@ class GeminiService:
         )
         data_path = os.path.join(base_dir, "data", f"{patient_id}.json")
 
-        if not os.path.exists(data_path):
-            return "{}"
-
         try:
             with open(data_path, "r") as f:
                 return f.read()
+        except FileNotFoundError:
+            return "{}"
         except Exception as e:
             print(f"Error reading patient data: {e}")
             return "{}"
@@ -240,6 +242,8 @@ class GeminiService:
             input_tokens = usage.prompt_token_count if usage else 0
             output_tokens = usage.candidates_token_count if usage else 0
             total_tokens = usage.total_token_count if usage else 0
+
+            logger.debug("[TOKEN_USAGE] input=%d, output=%d, total=%d", input_tokens, output_tokens, total_tokens)
 
             return {
                 "response": response.text,

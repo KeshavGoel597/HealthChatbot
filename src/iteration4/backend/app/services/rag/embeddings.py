@@ -57,8 +57,7 @@ class EmbeddingIndex:
             for cui, entries in raw_vocab.items():
                 if entries:
                     # Pick the shortest, most readable name
-                    names = [e[1] for e in entries]
-                    self.cui_names[cui] = min(names, key=len)
+                    self.cui_names[cui] = min((e[1] for e in entries), key=len)
             print(f"[EmbeddingIndex] Loaded {len(self.cui_names)} CUI names.")
 
         # --- Load SapBERT encoder ---

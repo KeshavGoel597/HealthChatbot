@@ -19,34 +19,28 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 _DEFAULT_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
 
 _SYSTEM_MSG = (
-    "You are a data extraction tool. "
-    "You only output valid JSON lists of strings."
+    "Extract medical retrieval keywords. "
+    "Output only a valid JSON list of strings."
 )
 
-_FEW_SHOT = """Extract medical symptoms, conditions, and treatments from the text. 
-Normalize them to standard medical terms. Include specific body parts, laterality, pain quality, and duration if mentioned. 
-Map colloquial euphemisms to their correct anatomical regions. 
-Crucially, ignore negated symptoms (symptoms the patient explicitly says they do not have).
-Output strictly as a JSON list of strings without any conversational text.
+_FEW_SHOT = """Extract medical keywords for retrieval.
+
+Rules:
+- Output only a JSON list of strings.
+- Include symptoms, diagnoses, comorbidities, medications, labs, and history terms when relevant.
+- Normalize to standard medical terms; map colloquial phrases to clinical terms.
+- Ignore negated symptoms.
+- Keep useful detail (body part, laterality, pain quality, duration) when present.
+- If the query is about records/history/chart, prefer broad record categories over specific symptoms.
 
 Text: "I have the runs and both of my knees are swollen."
 Output: ["diarrhea", "swollen knees"]
 
-Text: "there is a slight discomfort in my nether regions"
-Output: ["pelvic discomfort"]
-
 Text: "My stomach hurts but I don't have any nausea or vomiting."
 Output: ["stomach ache"]
 
-Text: "I have a sharp, stabbing pain in my chest."
-Output: ["sharp stabbing chest pain"]
-
-Text: "I've had this cough for over a month."
-Output: ["chronic cough"]
-
-Text: "I feel lightheaded and like the room is spinning."
-Output: ["lightheadedness", "vertigo"]
-
+Text: "Tell me about my medical history and records."
+Output: ["diagnosis", "comorbidity", "medications", "lab results", "symptoms", "patient history", "vitals", "discharge summary"]
 """
 
 

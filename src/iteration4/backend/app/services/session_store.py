@@ -21,12 +21,12 @@ def get_session_path(session_id: str) -> str:
 
 def load_session(session_id: str) -> Optional[ChatSession]:
     path = get_session_path(session_id)
-    if not os.path.exists(path):
-        return None
     try:
         with open(path, "r") as f:
             data = json.load(f)
             return ChatSession(**data)
+    except FileNotFoundError:
+        return None
     except Exception as e:
         print(f"Error loading session {session_id}: {e}")
         return None
@@ -35,4 +35,4 @@ def load_session(session_id: str) -> Optional[ChatSession]:
 def save_session(session: ChatSession):
     path = get_session_path(session.id)
     with open(path, "w") as f:
-        json.dump(session.dict(), f, indent=2)
+        json.dump(session.model_dump(), f, indent=2)

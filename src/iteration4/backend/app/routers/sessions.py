@@ -26,6 +26,7 @@ from app.services.rag.pipeline import run_pipeline
 from app.services.session_store import (
     SESSIONS_DIR, get_session_path, load_session, save_session,
 )
+from app.services.safety import check_safety
 import os
 import json
 import uuid
@@ -37,12 +38,11 @@ from typing import List, Optional
 
 sarvam_service = SarvamService()
 
-_medgemma_service = None
+from functools import lru_cache
+
+@lru_cache(maxsize=1)
 def get_medgemma_service():
-    global _medgemma_service
-    if _medgemma_service is None:
-        _medgemma_service = MedGemmaService()
-    return _medgemma_service
+    return MedGemmaService()
 
 router = APIRouter()
 
@@ -58,13 +58,15 @@ def run_retention_cleanup():
     Delete sessions whose expires_at datetime has passed.
     Called at startup and can be called periodically.
     """
-    if not os.path.exists(SESSIONS_DIR):
+    try:
+        filenames = os.listdir(SESSIONS_DIR)
+    except FileNotFoundError:
         return
 
     now = datetime.now()
     deleted_count = 0
 
-    for filename in os.listdir(SESSIONS_DIR):
+    for filename in filenames:
         if not filename.endswith(".json"):
             continue
         session_id = filename.replace(".json", "")
@@ -89,11 +91,13 @@ def run_retention_cleanup():
 async def list_sessions(patient_id: str):
     """List all active (non-expired) sessions for a patient."""
     sessions = []
-    if not os.path.exists(SESSIONS_DIR):
+    try:
+        filenames = os.listdir(SESSIONS_DIR)
+    except FileNotFoundError:
         return []
 
     now = datetime.now()
-    for filename in os.listdir(SESSIONS_DIR):
+    for filename in filenames:
         if filename.endswith(".json"):
             session_id = filename.replace(".json", "")
             session = _load_session(session_id)
@@ -188,6 +192,29 @@ async def send_message(session_id: str, request: ChatMessage, req: Request):
         session.title = request.message[:30] + "..." if len(request.message) > 30 else request.message
 
     session.messages.append(user_msg)
+
+    # Safety check
+    safety = check_safety(request.message)
+    if safety.triggered:
+        assistant_msg = SessionMessage(
+            role="assistant",
+            content=safety.response,
+            timestamp=datetime.now().isoformat(),
+            emr_fields_used=[],
+        )
+        session.messages.append(assistant_msg)
+        if effective_history_consent:
+            _save_session(session)
+        return ChatResponse(
+            response=safety.response,
+            input_tokens=0,
+            output_tokens=0,
+            total_tokens=0,
+            model_name="safety-guardrail",
+            language=request.language or "en-IN",
+            emr_fields_used=[],
+            was_compacted=False,
+        )
 
     # GDPR Art. 5(1)(e): Only persist messages if user has opted in to storage
     if effective_history_consent:
@@ -310,7 +337,7 @@ async def send_message(session_id: str, request: ChatMessage, req: Request):
         else:
             # Still save session metadata (consent flags, title, compacted_summary)
             # but with messages cleared — we store the conversation structure not the content
-            session_meta = session.copy()
+            session_meta = session.model_copy()
             session_meta.messages = []
             _save_session(session_meta)
 

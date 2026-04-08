@@ -1,23 +1,22 @@
 import logging
+from functools import lru_cache
 
 from fastapi import APIRouter, HTTPException, Request
 from app.models.chat_models import ChatMessage, ChatResponse
 from app.services.gemini_service import GeminiService
 from app.services.huggingface_service import HuggingFaceService
 from app.services.rag.pipeline import run_pipeline
+from app.services.safety import check_safety
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 gemini_service = GeminiService()
-# Lazy init for HF service to avoid loading 8GB on startup if not used
-hf_service = None
 
+# Lazy init for HF service to avoid loading 8GB on startup if not used
+@lru_cache(maxsize=1)
 def get_hf_service():
-    global hf_service
-    if hf_service is None:
-        hf_service = HuggingFaceService()
-    return hf_service
+    return HuggingFaceService()
 
 
 def _get_emr_path(patient_id: str) -> str:
@@ -31,6 +30,17 @@ def _get_emr_path(patient_id: str) -> str:
 async def chat_endpoint(request: ChatMessage, req: Request):
     try:
         print(f"[CHAT] Received request: model={request.model}, patient={request.patient_id}, consent={request.emr_consent}", flush=True)
+        safety = check_safety(request.message)
+        if safety.triggered:
+            return ChatResponse(
+                response=safety.response,
+                input_tokens=0,
+                output_tokens=0,
+                total_tokens=0,
+                model_name="safety-guardrail",
+                emr_fields_used=[],
+                was_compacted=False,
+            )
         # GDPR Art. 5(1)(a) — only run RAG / load EMR if patient has given consent
         system_prompt = ""
         if request.emr_consent:

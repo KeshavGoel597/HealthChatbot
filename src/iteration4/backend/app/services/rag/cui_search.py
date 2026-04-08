@@ -48,7 +48,6 @@ def find_cuis(
 
     best: dict[str, dict] = {}  # cui → result dict (keep highest score)
 
-    print("here are the terms:", terms)
     for term in terms:
         query_vec = index.encode(term)
         results = index.search(query_vec, top_k)

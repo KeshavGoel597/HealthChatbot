@@ -119,12 +119,11 @@ async def delete_session(session_id: str):
     The patient's EMR data is NOT affected — only the conversation log is deleted.
     """
     path = _get_session_path(session_id)
-    if not os.path.exists(path):
-        raise HTTPException(status_code=404, detail="Session not found")
-
     try:
         os.remove(path)
         print(f"[GDPR Art.17] Session {session_id} deleted on erasure request.")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Session not found")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete session: {str(e)}")
 
@@ -148,7 +147,12 @@ async def delete_all_patient_sessions(patient_id: str):
 
     The patient's EMR data is NOT affected — only the conversation logs are deleted.
     """
-    if not os.path.exists(SESSIONS_DIR):
+    deleted = []
+    errors = []
+
+    try:
+        filenames = os.listdir(SESSIONS_DIR)
+    except FileNotFoundError:
         return {
             "gdpr_action": "no_sessions_found",
             "gdpr_article": "Art. 17 — Right to Erasure",
@@ -156,10 +160,7 @@ async def delete_all_patient_sessions(patient_id: str):
             "sessions_deleted": 0,
         }
 
-    deleted = []
-    errors = []
-
-    for filename in os.listdir(SESSIONS_DIR):
+    for filename in filenames:
         if not filename.endswith(".json"):
             continue
         session_id = filename.replace(".json", "")

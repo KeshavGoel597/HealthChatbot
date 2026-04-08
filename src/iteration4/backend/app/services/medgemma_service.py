@@ -65,12 +65,11 @@ class MedGemmaService:
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         data_path = os.path.join(base_dir, "data", f"{patient_id}.json")
 
-        if not os.path.exists(data_path):
-            return "{}"
-
         try:
             with open(data_path, "r") as f:
                 return f.read()
+        except FileNotFoundError:
+            return "{}"
         except Exception as e:
             print(f"Error reading patient data: {e}")
             return "{}"

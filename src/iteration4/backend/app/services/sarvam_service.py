@@ -140,10 +140,10 @@ class SarvamService:
         try:
             output_io = io.BytesIO()
             with wave.open(output_io, 'wb') as wav_out:
-                with wave.open(io.BytesIO(audio_results[0]), 'rb') as wav_in:
-                    wav_out.setparams(wav_in.getparams())
-                for audio_bytes in audio_results:
+                for i, audio_bytes in enumerate(audio_results):
                     with wave.open(io.BytesIO(audio_bytes), 'rb') as wav_in:
+                        if i == 0:
+                            wav_out.setparams(wav_in.getparams())
                         wav_out.writeframes(wav_in.readframes(wav_in.getnframes()))
             return base64.b64encode(output_io.getvalue()).decode('utf-8')
         except Exception as e:

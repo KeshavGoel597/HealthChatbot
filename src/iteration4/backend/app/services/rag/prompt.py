@@ -149,8 +149,8 @@ def assemble_prompt(
         "are relevant to the question. "
         "If the records contain information that answers the patient's question, "
         "lead with that information and explain it clearly.\n\n"
-        "If the clinical record does not cover the patient's question, you must"
-        "supplement with general medical knowledge. THIS IS VERY IMPORTANT. You must at least answer the question"
-        "but clearly indicate when you"
+        "If the clinical record does not cover the patient's question, you must "
+        "supplement with general medical knowledge. THIS IS VERY IMPORTANT. You must at least answer the question "
+        "but clearly indicate when you "
         "are doing so and advise the patient to consult their doctor for specifics."
     )
