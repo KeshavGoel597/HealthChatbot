@@ -8,7 +8,6 @@ import torch
 from transformers import AutoProcessor, AutoModelForImageTextToText
 import os
 import asyncio
-import re
 from dotenv import load_dotenv
 
 from app.services.context_compaction import (
@@ -195,3 +194,4 @@ class MedGemmaService:
             "was_compacted": was_compacted,
             "new_compacted_summary": new_compacted_summary,
         }
+

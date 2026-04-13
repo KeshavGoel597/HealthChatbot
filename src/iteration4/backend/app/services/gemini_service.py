@@ -14,7 +14,6 @@ RAG Integration:
 
 import os
 import json
-import asyncio
 import logging
 from google import genai
 from google.genai import types
@@ -267,3 +266,4 @@ class GeminiService:
                 "was_compacted": False,
                 "new_compacted_summary": compacted_summary,
             }
+

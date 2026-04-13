@@ -17,7 +17,8 @@ Context Compaction:
   If exceeded, older turns are summarised and replaced by a compact_summary block.
 """
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
+import json
 from app.models.chat_models import (
     ChatSession, SessionMessage, ChatResponse, ChatMessage, SessionCreateRequest
 )
@@ -28,7 +29,6 @@ from app.services.session_store import (
 )
 from app.services.safety import check_safety
 import os
-import json
 import uuid
 from app.services.sarvam_service import SarvamService
 from app.services.medgemma_service import MedGemmaService
@@ -222,6 +222,7 @@ async def send_message(session_id: str, request: ChatMessage, req: Request):
 
     # 2. Run RAG pipeline for focused context (only if EMR consent given)
     system_prompt = ""
+    emr_fields_used_from_rag = []
     if effective_emr_consent:
         try:
             index = req.app.state.embedding_index
@@ -238,6 +239,14 @@ async def send_message(session_id: str, request: ChatMessage, req: Request):
                 extractor=extractor,
             )
             system_prompt = pipeline_result.system_prompt
+            
+            for match in pipeline_result.matches:
+                category = match.section.category.title()
+                if match.section.text:
+                    short_text = match.section.text[:50] + ("..." if len(match.section.text) > 50 else "")
+                    category += f" ({short_text})"
+                if category not in emr_fields_used_from_rag:
+                    emr_fields_used_from_rag.append(category)
         except Exception as e:
             print(f"RAG pipeline error: {e}")
             system_prompt = ""
@@ -323,6 +332,9 @@ async def send_message(session_id: str, request: ChatMessage, req: Request):
 
         # 6. Add assistant message with emr_fields_used for GDPR Art. 15
         emr_fields_used = result.get("emr_fields_used", [])
+        if emr_fields_used == ["RAG Pipeline (SNOMED Knowledge Graph)"] and emr_fields_used_from_rag:
+            emr_fields_used = emr_fields_used_from_rag
+
         assistant_msg = SessionMessage(
             role="assistant",
             content=final_response_text,
@@ -354,3 +366,18 @@ async def send_message(session_id: str, request: ChatMessage, req: Request):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/transcribe")
+async def transcribe_audio(
+    file: UploadFile = File(...),
+    language_code: str = Form(default="unknown"),
+):
+    """Transcribe audio via Sarvam STT. Keeps API key server-side."""
+    audio_bytes = await file.read()
+    transcript = sarvam_service.speech_to_text(audio_bytes, language_code)
+    if transcript is None:
+        raise HTTPException(status_code=502, detail="Transcription failed")
+    return {"transcript": transcript}
+
+

@@ -149,3 +149,20 @@ class SarvamService:
         except Exception as e:
             print(f"Error joining audio: {e}")
             return base64.b64encode(audio_results[0]).decode('utf-8')
+
+    def speech_to_text(self, audio_bytes: bytes, language_code: str = "unknown") -> Optional[str]:
+        """Transcribe audio using Sarvam Saarika v2.5."""
+        if not self.api_key:
+            return None
+        try:
+            response = requests.post(
+                f"{self.base_url}/speech-to-text",
+                headers=self._get_headers(),
+                files={"file": ("audio.webm", audio_bytes, "audio/webm")},
+                data={"model": "saarika:v2.5", "language_code": language_code},
+            )
+            response.raise_for_status()
+            return response.json().get("transcript")
+        except Exception as e:
+            print(f"Sarvam STT error: {e}")
+            return None

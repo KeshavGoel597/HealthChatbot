@@ -14,7 +14,6 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 import os
 import asyncio
 from dotenv import load_dotenv
-import re
 
 from app.services.context_compaction import (
     build_llm_history,
@@ -176,3 +175,4 @@ class HuggingFaceService:
             "was_compacted": was_compacted,
             "new_compacted_summary": new_compacted_summary,
         }
+

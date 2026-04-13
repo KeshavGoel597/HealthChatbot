@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Send, User, Bot, Loader2, Settings, PanelLeftClose, PanelLeftOpen, Languages, Volume2, FileText, ChevronDown, ChevronUp, AlertTriangle, Layers } from 'lucide-react'
+import { Send, User, Bot, Loader2, Settings, PanelLeftClose, PanelLeftOpen, Languages, Volume2, FileText, ChevronDown, ChevronUp, AlertTriangle, Layers, Mic, MicOff } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -66,6 +66,12 @@ export function ChatInterface() {
   const [emrConsent, setEmrConsent] = useState(false)
   const [storeHistoryConsent, setStoreHistoryConsent] = useState(false)
   const [consentGiven, setConsentGiven] = useState(false)
+
+  // Voice input state
+  const [isRecording, setIsRecording] = useState(false)
+  const [isTranscribing, setIsTranscribing] = useState(false)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
 
   // Evidence panel state (per message index)
   const [evidencePanelOpen, setEvidencePanelOpen] = useState<Record<number, boolean>>({})
@@ -160,6 +166,42 @@ export function ChatInterface() {
     }
   }
 
+  const handleMicToggle = async () => {
+    if (isRecording) {
+      mediaRecorderRef.current?.stop()
+      setIsRecording(false)
+      return
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const recorder = new MediaRecorder(stream)
+      audioChunksRef.current = []
+      recorder.ondataavailable = (e) => audioChunksRef.current.push(e.data)
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop())
+        const blob = new Blob(audioChunksRef.current, { type: "audio/webm" })
+        setIsTranscribing(true)
+        try {
+          const form = new FormData()
+          form.append("file", blob, "audio.webm")
+          form.append("language_code", language === "en-IN" ? "unknown" : language)
+          const res = await fetch(`${BACKEND_URL}/transcribe`, { method: "POST", body: form })
+          if (res.ok) {
+            const { transcript } = await res.json()
+            setInput(transcript)
+          }
+        } finally {
+          setIsTranscribing(false)
+        }
+      }
+      recorder.start()
+      mediaRecorderRef.current = recorder
+      setIsRecording(true)
+    } catch {
+      // Permission denied or no mic — browser already shows the error
+    }
+  }
+
   const handleSend = async () => {
     if (!input.trim() || !consentGiven) return
 
@@ -172,7 +214,6 @@ export function ChatInterface() {
       const isNewSession = !currentSessionId
       let sessionId = currentSessionId
 
-      // If no session, create one with the current consent settings
       if (!sessionId) {
         const createRes = await fetch(`${BACKEND_URL}/sessions/patient101`, {
           method: 'POST',
@@ -192,10 +233,6 @@ export function ChatInterface() {
         }
       }
 
-      // Send message (with extended timeout for TTS)
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 120000)
-
       const response = await fetch(`${BACKEND_URL}/sessions/${sessionId}/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -205,29 +242,24 @@ export function ChatInterface() {
           model: model,
           language: language,
           audio_requested: language !== "en-IN",
-          emr_consent: emrConsent,                   // GDPR Art. 5(1)(a)
-          store_history_consent: storeHistoryConsent, // GDPR Art. 5(1)(e)
+          emr_consent: emrConsent,
+          store_history_consent: storeHistoryConsent,
         }),
-        signal: controller.signal,
       })
-
-      clearTimeout(timeoutId)
 
       if (!response.ok) {
         const errorText = await response.text()
         console.error("Server error:", response.status, errorText)
         throw new Error(`Server error: ${response.status}`)
       }
-
       const data = await response.json()
-      const assistantMessage: Message = {
-        role: 'assistant',
+      setMessages(prev => [...prev, {
+        role: 'assistant' as const,
         content: data.response,
         audio_content: data.audio_content,
-        emr_fields_used: data.emr_fields_used || [],  // GDPR Art. 15
+        emr_fields_used: data.emr_fields_used || [],
         was_compacted: data.was_compacted || false,
-      }
-      setMessages(prev => [...prev, assistantMessage])
+      }])
 
       if (isNewSession) {
         fetchSessions()
@@ -444,14 +476,17 @@ export function ChatInterface() {
                 </div>
               ))}
 
-              {isLoading && (
+              {isLoading && messages[messages.length - 1]?.role !== 'assistant' && (
                 <div className="flex gap-4">
                   <Avatar className="h-8 w-8 mt-1 shrink-0">
                     <AvatarFallback className="bg-primary/10 text-primary"><Bot size={16} /></AvatarFallback>
                   </Avatar>
                   <div className="bg-muted/50 border rounded-2xl rounded-tl-sm px-5 py-3 flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                    <span className="text-xs text-muted-foreground">Thinking...</span>
+                    <span className="inline-flex items-center gap-1 text-muted-foreground" aria-label="Thinking">
+                      <span className="h-1.5 w-1.5 rounded-full bg-current animate-bounce [animation-delay:0ms]" />
+                      <span className="h-1.5 w-1.5 rounded-full bg-current animate-bounce [animation-delay:150ms]" />
+                      <span className="h-1.5 w-1.5 rounded-full bg-current animate-bounce [animation-delay:300ms]" />
+                    </span>
                   </div>
                 </div>
               )}
@@ -462,13 +497,33 @@ export function ChatInterface() {
         {/* Input Area */}
         <div className="p-3 md:p-4 bg-background border-t">
           <div className="max-w-3xl mx-auto relative">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={handleMicToggle}
+              disabled={isLoading || isTranscribing || !consentGiven}
+              className={`absolute left-1.5 top-1.5 h-9 w-9 rounded-full ${isRecording ? 'text-red-500' : 'text-muted-foreground'}`}
+            >
+              {isTranscribing
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : isRecording
+                  ? <MicOff className="h-4 w-4 animate-pulse" />
+                  : <Mic className="h-4 w-4" />
+              }
+            </Button>
             <Input
-              placeholder={consentGiven ? "Message Robert..." : "Please accept the privacy notice to begin..."}
-              value={input}
+              placeholder={
+                isRecording ? "Recording… click mic to stop"
+                : isTranscribing ? "Transcribing…"
+                : consentGiven ? "Message Robert…"
+                : "Please accept the privacy notice to begin…"
+              }
+              value={isRecording || isTranscribing ? "" : input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              disabled={isLoading || !consentGiven}
-              className="pr-12 py-6 text-base rounded-full border-muted-foreground/20 focus-visible:ring-offset-0 focus-visible:ring-1 focus-visible:ring-ring bg-muted/20"
+              disabled={isLoading || isRecording || isTranscribing || !consentGiven}
+              className="pl-12 pr-12 py-6 text-base rounded-full border-muted-foreground/20 focus-visible:ring-offset-0 focus-visible:ring-1 focus-visible:ring-ring bg-muted/20"
             />
             <Button
               onClick={handleSend}
