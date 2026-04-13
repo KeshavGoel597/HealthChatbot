@@ -17,6 +17,7 @@ from app.services.context_compaction import (
     compact_deterministic,
 )
 from app.services.emr_summary import summarize_emr_context
+from app.services.presidio_anonymizer import anonymize_history_for_llm, anonymize_text_for_llm
 
 load_dotenv()
 
@@ -99,6 +100,8 @@ class MedGemmaService:
         emr_consent: bool = False,
         *,
         system_prompt: str = "",
+        presidio_analyzer=None,
+        presidio_anonymizer=None,
     ) -> dict:
         if history is None:
             history = []
@@ -156,20 +159,46 @@ class MedGemmaService:
             f"{GDPR_SYSTEM_SUFFIX}"
         )
 
+        sanitized_system_content = anonymize_text_for_llm(
+            system_content,
+            presidio_analyzer,
+            presidio_anonymizer,
+        )
+        sanitized_history_for_llm = anonymize_history_for_llm(
+            history_for_llm,
+            presidio_analyzer,
+            presidio_anonymizer,
+        )
+        sanitized_message = anonymize_text_for_llm(
+            message,
+            presidio_analyzer,
+            presidio_anonymizer,
+        )
+
+        print("=== OUTBOUND LLM DEBUG (MedGemma) ===", flush=True)
+        print(
+            f"presidio_analyzer={'on' if presidio_analyzer is not None else 'off'} "
+            f"presidio_anonymizer={'on' if presidio_anonymizer is not None else 'off'}",
+            flush=True,
+        )
+        print(f"message_sanitized={sanitized_message}", flush=True)
+        print(f"system_content_sanitized={sanitized_system_content[:1500]}", flush=True)
+        print("=== END OUTBOUND LLM DEBUG (MedGemma) ===", flush=True)
+
         # MedGemma uses a specific message format
         messages_for_model = []
         # Inject system content into the first user message (MedGemma's format)
-        first_user_content = f"{system_content}\n\n"
+        first_user_content = f"{sanitized_system_content}\n\n"
 
         # Prepend compacted history as a text block if present
-        if history_for_llm:
+        if sanitized_history_for_llm:
             history_text = "\n".join(
                 [f"{'Patient' if m['role'] == 'user' else 'Robert'}: {m['content']}"
-                 for m in history_for_llm]
+                 for m in sanitized_history_for_llm]
             )
             first_user_content += f"[PRIOR CONVERSATION]\n{history_text}\n\n"
 
-        first_user_content += f"Patient says: {message}"
+        first_user_content += f"Patient says: {sanitized_message}"
 
         messages_for_model = [
             {"role": "user", "content": [{"type": "text", "text": first_user_content}]}

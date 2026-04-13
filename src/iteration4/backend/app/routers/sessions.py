@@ -257,6 +257,9 @@ async def send_message(session_id: str, request: ChatMessage, req: Request):
 
     # 3. Call LLM
     try:
+        presidio_analyzer = getattr(req.app.state, "presidio_analyzer", None)
+        presidio_anonymizer = getattr(req.app.state, "presidio_anonymizer", None)
+
         use_gemini = False
         use_medgemma = False
         if request.model and request.model.startswith("gemini"):
@@ -289,6 +292,8 @@ async def send_message(session_id: str, request: ChatMessage, req: Request):
                 compacted_summary=session.compacted_summary,
                 emr_consent=effective_emr_consent,
                 system_prompt=system_prompt,
+                presidio_analyzer=presidio_analyzer,
+                presidio_anonymizer=presidio_anonymizer,
             )
         elif use_medgemma:
             service = get_medgemma_service()
@@ -299,6 +304,8 @@ async def send_message(session_id: str, request: ChatMessage, req: Request):
                 compacted_summary=session.compacted_summary,
                 emr_consent=effective_emr_consent,
                 system_prompt=system_prompt,
+                presidio_analyzer=presidio_analyzer,
+                presidio_anonymizer=presidio_anonymizer,
             )
         else:
             service = get_hf_service()
@@ -309,6 +316,8 @@ async def send_message(session_id: str, request: ChatMessage, req: Request):
                 compacted_summary=session.compacted_summary,
                 emr_consent=effective_emr_consent,
                 system_prompt=system_prompt,
+                presidio_analyzer=presidio_analyzer,
+                presidio_anonymizer=presidio_anonymizer,
             )
 
         # Translation (Output)

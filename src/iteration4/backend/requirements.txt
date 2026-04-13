@@ -10,3 +10,5 @@ networkx
 numpy
 requests
 pydantic
+presidio-analyzer
+presidio-anonymizer

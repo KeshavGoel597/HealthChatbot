@@ -22,6 +22,7 @@ from app.services.context_compaction import (
     compact_deterministic,
 )
 from app.services.emr_summary import summarize_emr_context
+from app.services.presidio_anonymizer import anonymize_history_for_llm, anonymize_text_for_llm
 
 load_dotenv()
 
@@ -91,6 +92,8 @@ class HuggingFaceService:
         emr_consent: bool = False,
         *,
         system_prompt: str = "",
+        presidio_analyzer=None,
+        presidio_anonymizer=None,
     ) -> dict:
         if history is None:
             history = []
@@ -147,12 +150,38 @@ class HuggingFaceService:
             f"{GDPR_SYSTEM_SUFFIX}"
         )
 
-        messages = [{"role": "system", "content": system_content}]
+        sanitized_system_content = anonymize_text_for_llm(
+            system_content,
+            presidio_analyzer,
+            presidio_anonymizer,
+        )
+        sanitized_history_for_llm = anonymize_history_for_llm(
+            history_for_llm,
+            presidio_analyzer,
+            presidio_anonymizer,
+        )
+        sanitized_message = anonymize_text_for_llm(
+            message,
+            presidio_analyzer,
+            presidio_anonymizer,
+        )
 
-        for msg in history_for_llm:
+        print("=== OUTBOUND LLM DEBUG (HF) ===", flush=True)
+        print(
+            f"presidio_analyzer={'on' if presidio_analyzer is not None else 'off'} "
+            f"presidio_anonymizer={'on' if presidio_anonymizer is not None else 'off'}",
+            flush=True,
+        )
+        print(f"message_sanitized={sanitized_message}", flush=True)
+        print(f"system_content_sanitized={sanitized_system_content[:1500]}", flush=True)
+        print("=== END OUTBOUND LLM DEBUG (HF) ===", flush=True)
+
+        messages = [{"role": "system", "content": sanitized_system_content}]
+
+        for msg in sanitized_history_for_llm:
             messages.append({"role": msg["role"], "content": msg["content"]})
 
-        messages.append({"role": "user", "content": message})
+        messages.append({"role": "user", "content": sanitized_message})
 
         prompt = self.tokenizer.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True

@@ -24,6 +24,11 @@ from app.services.context_compaction import (
     split_for_compaction,
     compact_with_gemini,
 )
+from app.services.presidio_anonymizer import (
+    anonymize_history_for_llm,
+    anonymize_text_for_llm,
+    count_anonymized_replacements,
+)
 
 load_dotenv()
 
@@ -128,6 +133,8 @@ class GeminiService:
         emr_consent: bool = False,
         *,
         system_prompt: str = "",
+        presidio_analyzer=None,
+        presidio_anonymizer=None,
     ) -> dict:
         if history is None:
             history = []
@@ -208,9 +215,40 @@ class GeminiService:
             f"{GDPR_RESPONSE_DISCLAIMER}"
         )
 
+        sanitized_system_instruction_text = anonymize_text_for_llm(
+            system_instruction_text,
+            presidio_analyzer,
+            presidio_anonymizer,
+        )
+        sanitized_history_for_llm = anonymize_history_for_llm(
+            history_for_llm,
+            presidio_analyzer,
+            presidio_anonymizer,
+        )
+        sanitized_message = anonymize_text_for_llm(
+            message,
+            presidio_analyzer,
+            presidio_anonymizer,
+        )
+
+        print("=== OUTBOUND LLM DEBUG (Gemini) ===", flush=True)
+        print(
+            f"presidio_analyzer={'on' if presidio_analyzer is not None else 'off'} "
+            f"presidio_anonymizer={'on' if presidio_anonymizer is not None else 'off'}",
+            flush=True,
+        )
+        print(
+            f"message_replacements={count_anonymized_replacements(message, presidio_analyzer, presidio_anonymizer)} "
+            f"history_turns={len(sanitized_history_for_llm)}",
+            flush=True,
+        )
+        print(f"message_sanitized={sanitized_message}", flush=True)
+        print(f"system_instruction_sanitized={sanitized_system_instruction_text[:1500]}", flush=True)
+        print("=== END OUTBOUND LLM DEBUG (Gemini) ===", flush=True)
+
         # Build formatted contents for Gemini API
         formatted_contents = []
-        for msg in history_for_llm:
+        for msg in sanitized_history_for_llm:
             role = "model" if msg["role"] == "assistant" else "user"
             formatted_contents.append(
                 types.Content(
@@ -223,7 +261,7 @@ class GeminiService:
         formatted_contents.append(
             types.Content(
                 role="user",
-                parts=[types.Part(text=message)]
+                parts=[types.Part(text=sanitized_message)]
             )
         )
 
@@ -232,7 +270,7 @@ class GeminiService:
                 model=self.model_name,
                 contents=formatted_contents,
                 config=types.GenerateContentConfig(
-                    system_instruction=system_instruction_text,
+                    system_instruction=sanitized_system_instruction_text,
                     temperature=0.7
                 )
             )

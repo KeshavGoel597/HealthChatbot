@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -8,6 +9,8 @@ from app.routers import gdpr_router
 from app.services.rag.embeddings import EmbeddingIndex
 from app.services.rag.graph import KnowledgeGraph
 from app.services.rag.term_extractor import TermExtractor
+
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -26,6 +29,27 @@ async def lifespan(app: FastAPI):
     app.state.embedding_index = EmbeddingIndex(_EMBEDDING_PATH)
     app.state.knowledge_graph = KnowledgeGraph(_GRAPH_PATH)
     app.state.term_extractor = TermExtractor()
+
+    # Startup: initialize Presidio engines for outbound LLM prompt de-identification
+    app.state.presidio_analyzer = None
+    app.state.presidio_anonymizer = None
+    try:
+        from presidio_anonymizer import AnonymizerEngine
+        app.state.presidio_anonymizer = AnonymizerEngine()
+    except Exception as exc:
+        logger.warning("Presidio anonymizer initialization failed. De-identification will be skipped: %s", exc)
+
+    try:
+        from presidio_analyzer import AnalyzerEngine
+
+        app.state.presidio_analyzer = AnalyzerEngine()
+    except Exception as exc:
+        logger.warning("Presidio analyzer initialization failed. Falling back to limited de-identification: %s", exc)
+
+    if app.state.presidio_analyzer is not None and app.state.presidio_anonymizer is not None:
+        print("[STARTUP] Presidio analyzer/anonymizer initialized.")
+    elif app.state.presidio_anonymizer is not None:
+        print("[STARTUP] Presidio anonymizer initialized (analyzer fallback mode).")
 
     # GDPR Art. 5(1)(e) — Storage Limitation: clean up expired sessions
     from app.routers.sessions import run_retention_cleanup

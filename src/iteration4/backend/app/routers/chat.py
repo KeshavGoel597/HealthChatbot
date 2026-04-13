@@ -64,6 +64,9 @@ async def chat_endpoint(request: ChatMessage, req: Request):
         print(system_prompt if system_prompt else "(empty — no consent or no EMR)", flush=True)
         print("=== END SYSTEM PROMPT ===", flush=True)
 
+        presidio_analyzer = getattr(req.app.state, "presidio_analyzer", None)
+        presidio_anonymizer = getattr(req.app.state, "presidio_anonymizer", None)
+
         # Route to LLM service
         use_gemini = False
         if request.model and request.model.startswith("gemini"):
@@ -76,6 +79,8 @@ async def chat_endpoint(request: ChatMessage, req: Request):
                 request.message, request.patient_id,
                 system_prompt=system_prompt,
                 emr_consent=request.emr_consent,
+                presidio_analyzer=presidio_analyzer,
+                presidio_anonymizer=presidio_anonymizer,
             )
         else:
             service = get_hf_service()
@@ -83,6 +88,8 @@ async def chat_endpoint(request: ChatMessage, req: Request):
                 request.message, request.patient_id,
                 system_prompt=system_prompt,
                 emr_consent=request.emr_consent,
+                presidio_analyzer=presidio_analyzer,
+                presidio_anonymizer=presidio_anonymizer,
             )
 
         return ChatResponse(**llm_result)
