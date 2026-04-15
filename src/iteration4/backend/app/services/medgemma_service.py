@@ -1,13 +1,13 @@
+
 """
 MedGemmaService — GDPR-compliant, context-compaction-aware
 ===========================================================
-Uses deterministic compaction (no extra model call) since we run on local hardware.
+Refactored to use local Ollama inference for Mac hardware acceleration.
 """
 
-import torch
-from transformers import AutoProcessor, AutoModelForImageTextToText
 import os
 import asyncio
+import ollama
 from dotenv import load_dotenv
 
 from app.services.context_compaction import (
@@ -33,33 +33,26 @@ GDPR_SYSTEM_SUFFIX = (
 
 
 class MedGemmaService:
-    """Service for Google MedGemma 4B medical model."""
+    """Service for Google MedGemma 4B medical model running via Ollama."""
 
     def __init__(self):
-        self.model_name = "google/medgemma-1.5-4b-it"
-        self.processor = None
-        self.model = None
+        # This matches the tag you pulled: MedAIBase/MedGemma1.5:4b
+        self.model_name = "MedAIBase/MedGemma1.5:4b"
 
     def _summarize_emr_context(self, raw_data: str) -> tuple[str, list]:
         return summarize_emr_context(raw_data)
 
     def _load_model(self):
-        if self.model is None:
-            print(f"Loading MedGemma ({self.model_name})...")
-            try:
-                self.processor = AutoProcessor.from_pretrained(self.model_name)
-                self.model = AutoModelForImageTextToText.from_pretrained(
-                    self.model_name,
-                    device_map="auto",
-                    torch_dtype=torch.bfloat16
-                )
-                print("MedGemma loaded successfully.")
-            except Exception as e:
-                print(f"Failed to load MedGemma: {e}")
-                raise RuntimeError(
-                    f"Failed to load MedGemma. Ensure you have HuggingFace access "
-                    f"to this gated model (huggingface-cli login). Error: {e}"
-                )
+        """Checks if the Ollama service is reachable."""
+        try:
+            ollama.list()
+            print(f"Ollama is active. Using model: {self.model_name}")
+        except Exception as e:
+            print(f"Failed to connect to Ollama: {e}")
+            raise RuntimeError(
+                "Ollama service not detected. Please run 'brew services start ollama' "
+                "or open the Ollama application on your Mac."
+            )
 
     def get_patient_data(self, patient_id: str) -> str:
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -75,21 +68,23 @@ class MedGemmaService:
             return "{}"
 
     def _generate(self, messages: list, max_new_tokens: int = 512) -> str:
-        """Generate text using MedGemma's processor and model."""
-        inputs = self.processor.apply_chat_template(
-            messages,
-            add_generation_prompt=True,
-            tokenize=True,
-            return_dict=True,
-            return_tensors="pt",
-        ).to(self.model.device)
+        """Generate text using the Ollama local API."""
+        # Ollama expects content as a string, not a list of objects like HF Processor
+        formatted_messages = [
+            {"role": m["role"], "content": m["content"]}
+            for m in messages
+        ]
 
-        outputs = self.model.generate(**inputs, max_new_tokens=max_new_tokens)
-        response = self.processor.decode(
-            outputs[0][inputs["input_ids"].shape[-1]:],
-            skip_special_tokens=True
+        response = ollama.chat(
+            model=self.model_name,
+            messages=formatted_messages,
+            options={
+                "num_predict": max_new_tokens,
+                "temperature": 0.2, # Low temperature for clinical accuracy
+                "top_p": 0.9
+            }
         )
-        return response.strip()
+        return response['message']['content'].strip()
 
     async def chat(
         self,
@@ -159,38 +154,20 @@ class MedGemmaService:
             f"{GDPR_SYSTEM_SUFFIX}"
         )
 
+        # Anonymization logic (GDPR compliance)
         sanitized_system_content = anonymize_text_for_llm(
-            system_content,
-            presidio_analyzer,
-            presidio_anonymizer,
+            system_content, presidio_analyzer, presidio_anonymizer,
         )
         sanitized_history_for_llm = anonymize_history_for_llm(
-            history_for_llm,
-            presidio_analyzer,
-            presidio_anonymizer,
+            history_for_llm, presidio_analyzer, presidio_anonymizer,
         )
         sanitized_message = anonymize_text_for_llm(
-            message,
-            presidio_analyzer,
-            presidio_anonymizer,
+            message, presidio_analyzer, presidio_anonymizer,
         )
 
-        print("=== OUTBOUND LLM DEBUG (MedGemma) ===", flush=True)
-        print(
-            f"presidio_analyzer={'on' if presidio_analyzer is not None else 'off'} "
-            f"presidio_anonymizer={'on' if presidio_anonymizer is not None else 'off'}",
-            flush=True,
-        )
-        print(f"message_sanitized={sanitized_message}", flush=True)
-        print(f"system_content_sanitized={sanitized_system_content[:1500]}", flush=True)
-        print("=== END OUTBOUND LLM DEBUG (MedGemma) ===", flush=True)
-
-        # MedGemma uses a specific message format
-        messages_for_model = []
-        # Inject system content into the first user message (MedGemma's format)
+        # Build message block for Ollama
         first_user_content = f"{sanitized_system_content}\n\n"
 
-        # Prepend compacted history as a text block if present
         if sanitized_history_for_llm:
             history_text = "\n".join(
                 [f"{'Patient' if m['role'] == 'user' else 'Robert'}: {m['content']}"
@@ -201,16 +178,15 @@ class MedGemmaService:
         first_user_content += f"Patient says: {sanitized_message}"
 
         messages_for_model = [
-            {"role": "user", "content": [{"type": "text", "text": first_user_content}]}
+            {"role": "user", "content": first_user_content}
         ]
 
-        print("MedGemma: Generating response...")
+        print("MedGemma (Ollama): Generating response...")
         loop = asyncio.get_event_loop()
         response_text = await loop.run_in_executor(None, self._generate, messages_for_model)
 
         # Token counting (approximate for local model)
-        input_text = system_content + message
-        input_tokens = len(input_text.split()) * 2
+        input_tokens = len(first_user_content.split()) * 2
         output_tokens = len(response_text.split()) * 2
 
         return {
@@ -223,4 +199,3 @@ class MedGemmaService:
             "was_compacted": was_compacted,
             "new_compacted_summary": new_compacted_summary,
         }
-

@@ -12,3 +12,4 @@ requests
 pydantic
 presidio-analyzer
 presidio-anonymizer
+ollama
