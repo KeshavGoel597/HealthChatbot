@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 
+import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 _DEFAULT_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
@@ -54,7 +55,8 @@ class TermExtractor:
     def __init__(self, model_name: str = _DEFAULT_MODEL):
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModelForCausalLM.from_pretrained(
-            model_name, device_map="auto",
+            model_name,
+            device_map="auto" if torch.cuda.is_available() else None,
         )
         print(f"[TermExtractor] Loaded {model_name}")
 

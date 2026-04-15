@@ -15,17 +15,14 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from app.services.rag.embeddings import EmbeddingIndex
-from app.services.rag.cui_search import find_cuis
 from app.services.rag.term_extractor import TermExtractor
 from app.services.rag.graph import KnowledgeGraph
 from app.services.rag.graph_expand import (
     DIAGNOSTIC_RELATIONS,
-    expand_cuis,
     group_by_hop,
 )
-from app.services.rag.emr import parse_emr_file, extract_sections, deduplicate_sections
-from app.services.rag.emr_match import match_sections, MatchedSection
-from app.services.rag.prompt import assemble_prompt
+from app.services.rag.emr_match import MatchedSection
+from app.services.rag.pipeline import run_pipeline
 
 
 # ── Terminal colors ───────────────────────────────────────────────────
@@ -81,9 +78,8 @@ def print_phase1(query: str, results: list[dict]) -> None:
     print()
 
 
-def print_phase2(expanded, get_name) -> None:
+def print_phase2(expanded: list) -> None:
     groups = group_by_hop(expanded)
-    seeds = len(groups.get(0, []))
     total = len(expanded)
 
     print(f"  {C.BOLD}═══ Phase 2: Graph Expansion ═══{C.RESET}")
@@ -192,62 +188,53 @@ def main() -> None:
 
     print(f"  {C.DIM}Resources loaded in {time.time() - t0:.1f}s{C.RESET}")
 
-    # ── Parse EMR ──
-    emr = parse_emr_file(args.emr)
-    sections = extract_sections(emr)
-    if args.dedup:
-        sections = deduplicate_sections(sections)
-    print(f"  {C.DIM}EMR: {len(sections)} sections from {args.emr}{C.RESET}")
+    # ── Run pipeline ──
+    allowed = None if args.all_relations else DIAGNOSTIC_RELATIONS
+    result = run_pipeline(
+        args.query,
+        args.emr,
+        index,
+        graph,
+        extractor=extractor,
+        seed_top_k=args.top_k,
+        seed_threshold=args.threshold,
+        graph_depth=args.depth,
+        allowed_relations=allowed,
+        match_top_k=args.match_top_k,
+        match_threshold=args.match_threshold,
+        dedup=args.dedup,
+    )
 
-    # ── Phase 1: Seed CUIs ──
-    t0 = time.time()
-    phase1_results = find_cuis(args.query, index, top_k=args.top_k, threshold=args.threshold, extractor=extractor)
-    print_phase1(args.query, phase1_results)
+    print(f"  {C.DIM}EMR: {result.total_sections} sections from {args.emr}{C.RESET}")
 
-    seed_cuis = [r["cui"] for r in phase1_results]
-    if not seed_cuis:
+    # ── Display phases ──
+    print_phase1(args.query, result.seed_cuis)
+
+    if not result.seed_cuis:
         print(f"  {C.RED}No seed CUIs — aborting.{C.RESET}")
         return
 
-    # ── Phase 2: Graph expansion ──
-    t0 = time.time()
-    allowed = None if args.all_relations else DIAGNOSTIC_RELATIONS
-    expanded = expand_cuis(seed_cuis, graph, depth=args.depth, allowed_relations=allowed)
-    expanded_set = {r.cui for r in expanded}
-    p2_ms = (time.time() - t0) * 1000
+    print_phase2(result.expanded_cuis)
+    print_phase3(result.matches, index.get_name)
 
-    print_phase2(expanded, index.get_name)
-
-    # ── Phase 3: EMR matching ──
-    t0 = time.time()
-    matches = match_sections(
-        sections,
-        expanded_set,
-        index,
-        top_k=args.match_top_k,
-        threshold=args.match_threshold,
-    )
-    p3_ms = (time.time() - t0) * 1000
-
-    print_phase3(matches, index.get_name)
-
-    # ── Phase 4: Prompt assembly ──
+    # ── Phase 4: Prompt ──
     if args.show_prompt:
-        prompt = assemble_prompt(args.query, matches)
         print(f"  {C.BOLD}═══ Phase 4: Assembled Prompt ═══{C.RESET}")
         print(f"  {C.DIM}{'─' * 60}{C.RESET}")
-        for line in prompt.split('\n'):
+        for line in result.system_prompt.split('\n'):
             print(f"  {C.WHITE}{line}{C.RESET}")
         print(f"  {C.DIM}{'─' * 60}{C.RESET}")
-        print(f"  {C.DIM}Prompt length: {len(prompt)} chars{C.RESET}\n")
+        print(f"  {C.DIM}User message:{C.RESET}  {C.WHITE}\"{args.query}\"{C.RESET}")
+        print(f"  {C.DIM}{'─' * 60}{C.RESET}")
+        print(f"  {C.DIM}Prompt length: {len(result.system_prompt)} chars{C.RESET}\n")
 
     # ── Summary ──
     total_ms = (time.time() - t_total) * 1000
     print(
         f"  {C.DIM}Pipeline: "
-        f"{len(seed_cuis)} seeds → "
-        f"{len(expanded_set)} expanded CUIs ({p2_ms:.0f}ms) → "
-        f"{len(matches)}/{len(sections)} EMR sections matched ({p3_ms:.0f}ms) "
+        f"{len(result.seed_cuis)} seeds → "
+        f"{result.expanded_cui_count} expanded CUIs → "
+        f"{len(result.matches)}/{result.total_sections} EMR sections matched "
         f"[total: {total_ms / 1000:.1f}s]{C.RESET}\n"
     )
 

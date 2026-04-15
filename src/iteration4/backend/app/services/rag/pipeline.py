@@ -37,6 +37,7 @@ class PipelineResult:
 
     # Phase 2
     expanded_cui_count: int
+    expanded_cuis: list  # raw ExpandedCUI list from expand_cuis()
 
     # Phase 3
     matches: list[MatchedSection]
@@ -101,6 +102,7 @@ def run_pipeline(
         )
         expanded_set = {e.cui for e in expanded}
     else:
+        expanded = []
         expanded_set = set()
 
     # ── Phase 3: EMR matching ──
@@ -124,6 +126,7 @@ def run_pipeline(
     return PipelineResult(
         seed_cuis=seeds,
         expanded_cui_count=len(expanded_set),
+        expanded_cuis=expanded,
         matches=matches,
         system_prompt=system_prompt,
         context_text=context_text,
