@@ -13,9 +13,56 @@ for SapBERT CUI search than raw conversational text.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
+
+@dataclass
+class ExtractionResult:
+    """Structured output from the term extractor."""
+    intent: str               # "broad", "specific", or "mixed"
+    categories: list[str]     # EMR category strings for broad/mixed queries
+    terms: list[str]          # Clinical terms for specific/mixed CUI search
+
+
+_VALID_CATEGORIES: frozenset[str] = frozenset({
+    "diagnosis", "symptom", "comorbidity", "lab", "vitals",
+    "medicine", "history", "comment", "recommended_labs",
+    "demographics", "discharge",
+})
+
+
+def _parse_extraction_response(response: str, fallback_query: str) -> ExtractionResult:
+    """Parse Qwen model JSON output into ExtractionResult.
+
+    Validates category strings against _VALID_CATEGORIES so the pipeline
+    never receives a category name that does not exist in the EMR parser.
+    """
+    try:
+        parsed = json.loads(response)
+        if isinstance(parsed, dict):
+            intent = parsed.get("intent", "specific")
+            if intent not in ("broad", "specific", "mixed"):
+                intent = "specific"
+            raw_categories = parsed.get("categories", [])
+            categories = [
+                c for c in raw_categories
+                if isinstance(c, str) and c.strip() in _VALID_CATEGORIES
+            ]
+            raw_terms = parsed.get("terms", [])
+            terms = [s for s in raw_terms if isinstance(s, str) and s.strip()]
+            return ExtractionResult(intent=intent, categories=categories, terms=terms)
+        elif isinstance(parsed, list) and parsed and all(isinstance(t, str) for t in parsed):
+            return ExtractionResult(
+                intent="specific",
+                categories=[],
+                terms=[t for t in parsed if t.strip()],
+            )
+    except json.JSONDecodeError:
+        pass
+    return ExtractionResult(intent="specific", categories=[], terms=[fallback_query])
+
 
 _DEFAULT_MODEL = "Qwen/Qwen3-1.7B"
 
@@ -28,15 +75,19 @@ _FEW_SHOT = """Extract medical information for EMR retrieval.
 
 Return exactly one JSON object with:
 - "intent": one of "broad", "specific", "mixed"
-- "terms": a JSON list of strings
+- "categories": a JSON list — use only strings from this fixed set:
+  diagnosis, symptom, comorbidity, lab, vitals, medicine,
+  history, comment, recommended_labs, demographics, discharge
+- "terms": a JSON list of normalized clinical term strings
 
 Rules:
-- "broad" = user wants whole categories or records, not a specific symptom.
-  Use category terms such as: medications, diagnoses, comorbidities, labs, vitals, history, notes, allergies, procedures.
+- "broad" = user wants whole record categories, not a specific finding.
+  Set categories to the relevant EMR sections. Leave terms empty.
 - "specific" = user asks about a symptom, condition, medication, or lab value.
-- "mixed" = both broad category intent and specific clinical detail are present.
-- Remove negated terms.
-- Negation applies only to the phrase it directly modifies.
+  Set terms. Leave categories empty.
+- "mixed" = both a broad category and a specific clinical detail are present.
+  Set both categories and terms.
+- Remove negated terms. Negation applies only to the phrase it directly modifies.
 - Normalize colloquial phrases to standard medical terms.
 - Keep useful details like body part or laterality when relevant.
 - Do not add symptoms that are not mentioned.
@@ -45,28 +96,37 @@ Rules:
 Examples:
 
 Text: "I don't have body pain"
-Output: {"intent":"specific","terms":[]}
+Output: {"intent":"specific","categories":[],"terms":[]}
 
 Text: "I don't have eye pain, but I do have finger pain"
-Output: {"intent":"specific","terms":["finger pain"]}
+Output: {"intent":"specific","categories":[],"terms":["finger pain"]}
 
 Text: "No fever, but I have a cough"
-Output: {"intent":"specific","terms":["cough"]}
-
-Text: "Show my full medical history"
-Output: {"intent":"broad","terms":["history"]}
+Output: {"intent":"specific","categories":[],"terms":["cough"]}
 
 Text: "List all my medications"
-Output: {"intent":"broad","terms":["medications"]}
+Output: {"intent":"broad","categories":["medicine"],"terms":[]}
 
 Text: "Tell me all my diagnoses"
-Output: {"intent":"broad","terms":["diagnoses","comorbidities"]}
+Output: {"intent":"broad","categories":["diagnosis","comorbidity"],"terms":[]}
+
+Text: "Show my full medical history"
+Output: {"intent":"broad","categories":["diagnosis","symptom","comorbidity","medicine","lab","vitals","history"],"terms":[]}
+
+Text: "What are my latest lab results?"
+Output: {"intent":"broad","categories":["lab"],"terms":[]}
+
+Text: "What are my allergies and conditions?"
+Output: {"intent":"broad","categories":["comorbidity"],"terms":[]}
 
 Text: "Show my diabetes medications"
-Output: {"intent":"mixed","terms":["medications","diabetes"]}
+Output: {"intent":"mixed","categories":["medicine"],"terms":["diabetes"]}
+
+Text: "What lab results relate to my kidney disease?"
+Output: {"intent":"mixed","categories":["lab"],"terms":["kidney disease","creatinine"]}
 
 Text: "Why is my HbA1c high?"
-Output: {"intent":"specific","terms":["high HbA1c"]}
+Output: {"intent":"specific","categories":[],"terms":["high HbA1c"]}
 """
 
 
@@ -88,17 +148,14 @@ class TermExtractor:
         device_label = "GPU" if torch.cuda.is_available() else "CPU"
         print(f"[TermExtractor] Loaded {model_name} on {device_label}")
 
-    def extract(self, query: str) -> list[str]:
-        """Extract medical terms from a natural language query.
-
-        Args:
-            query: Patient's natural language input
-                   (e.g. "I have a headache, what should I do?").
+    def extract(self, query: str) -> ExtractionResult:
+        """Extract EMR categories and clinical terms from a natural language query.
 
         Returns:
-            List of normalized medical term strings
-            (e.g. ["headache"]).
-            Falls back to [query] if extraction fails.
+            ExtractionResult with intent, categories (EMR category strings for
+            broad/mixed queries), and terms (clinical terms for CUI search).
+            Falls back to ExtractionResult(intent="specific", categories=[],
+            terms=[query]) on parse failure.
         """
         prompt = _FEW_SHOT + f'Text: "{query}"\nOutput:'
         messages = [
@@ -122,32 +179,13 @@ class TermExtractor:
             min_p=0.0,
         )
 
-        # Strip input tokens from output
         gen_ids = output_ids[0][inputs.input_ids.shape[1]:]
         response = self.tokenizer.decode(gen_ids, skip_special_tokens=True).strip()
 
         # Model sometimes wraps output in ```json ... ``` fences — strip them
         if response.startswith("```"):
             lines = response.splitlines()
-            # Remove first line (```json) and last line (```)
             inner = [l for l in lines[1:] if l.strip() != "```"]
             response = "\n".join(inner).strip()
 
-        try:
-            parsed = json.loads(response)
-            # Model sometimes returns a dict (e.g. {"medical_symptoms": [...]})
-            # instead of a flat list — extract all string values from it
-            if isinstance(parsed, dict):
-                terms = []
-                for v in parsed.values():
-                    if isinstance(v, list):
-                        terms.extend(s for s in v if isinstance(s, str) and s.strip())
-                if terms:
-                    return terms
-            elif isinstance(parsed, list) and parsed and all(isinstance(t, str) for t in parsed):
-                return [t for t in parsed if t.strip()]
-        except json.JSONDecodeError:
-            pass
-
-        # Fallback: use the raw query as a single term
-        return [query]
+        return _parse_extraction_response(response, query)
