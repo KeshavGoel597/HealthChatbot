@@ -6,6 +6,9 @@ Usage:
     # Single query
     python -m app.cli.cui_search "my head hurts"
 
+    # Term extraction only (no CUI search)
+    python -m app.cli.cui_search "show my full medication history" --terms-only
+
     # Custom top-k and threshold
     python -m app.cli.cui_search "chest pain" --top-k 5 --threshold 0.8
 
@@ -64,6 +67,8 @@ Examples:
     parser.add_argument("-t", "--threshold", type=float, default=0.7, help="Min cosine similarity (default: 0.7)")
     parser.add_argument("--embeddings", type=str, default=None, help="Path to CUI embedding pickle")
     parser.add_argument("--vocab", type=str, default=None, help="Path to CUI_Vocab.json")
+    parser.add_argument("--show-terms", action="store_true", help="Print extracted medical terms before CUI results")
+    parser.add_argument("--terms-only", action="store_true", help="Only run term extraction and print extracted terms (skip CUI search)")
     return parser.parse_args()
 
 
@@ -77,16 +82,29 @@ def load_index(args: argparse.Namespace) -> EmbeddingIndex:
     return index
 
 
-def run_query(query: str, index: EmbeddingIndex, extractor: TermExtractor, top_k: int, threshold: float) -> None:
+def run_query(query: str, index: EmbeddingIndex, extractor: TermExtractor, top_k: int, threshold: float, show_terms: bool = False) -> None:
     """Run a single query and print results."""
+    extracted = extractor.extract(query)
+    if show_terms:
+        print(f"\n  Extracted terms: {extracted.terms}")
     t0 = time.time()
-    results = find_cuis(query, index, top_k=top_k, threshold=threshold, extractor=extractor)
+    results = find_cuis(extracted.terms, index, top_k=top_k, threshold=threshold)
     elapsed_ms = (time.time() - t0) * 1000
     print_results(query, results)
     print(f"  ({elapsed_ms:.0f}ms, {len(results)} results above {threshold} threshold)\n")
 
 
-def interactive_loop(index: EmbeddingIndex, extractor: TermExtractor, top_k: int, threshold: float) -> None:
+def run_terms_only(query: str, extractor: TermExtractor) -> None:
+    """Run only term extraction and print extracted terms."""
+    t0 = time.time()
+    extracted = extractor.extract(query)
+    elapsed_ms = (time.time() - t0) * 1000
+    print(f'\n  Query: "{query}"')
+    print(f"  Extracted terms: {extracted.terms}")
+    print(f"  ({elapsed_ms:.0f}ms, terms-only mode)\n")
+
+
+def interactive_loop(index: EmbeddingIndex, extractor: TermExtractor, top_k: int, threshold: float, show_terms: bool = False) -> None:
     """REPL: keep accepting queries until Ctrl-C or 'quit'."""
     print("Interactive mode — type a query and press Enter. 'quit' or Ctrl-C to exit.\n")
     while True:
@@ -98,7 +116,22 @@ def interactive_loop(index: EmbeddingIndex, extractor: TermExtractor, top_k: int
         if not query or query.lower() in ("quit", "exit", "q"):
             print("Bye.")
             break
-        run_query(query, index, extractor, top_k, threshold)
+        run_query(query, index, extractor, top_k, threshold, show_terms)
+
+
+def interactive_terms_loop(extractor: TermExtractor) -> None:
+    """REPL for term extraction only."""
+    print("Interactive terms-only mode — type a query and press Enter. 'quit' or Ctrl-C to exit.\n")
+    while True:
+        try:
+            query = input("query> ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print("\nBye.")
+            break
+        if not query or query.lower() in ("quit", "exit", "q"):
+            print("Bye.")
+            break
+        run_terms_only(query, extractor)
 
 
 def main() -> None:
@@ -109,13 +142,21 @@ def main() -> None:
         parse_args()  # will print help
         sys.exit(1)
 
-    index = load_index(args)
     extractor = TermExtractor()
 
+    if args.terms_only:
+        if args.interactive:
+            interactive_terms_loop(extractor)
+        else:
+            run_terms_only(args.query, extractor)
+        return
+
+    index = load_index(args)
+
     if args.interactive:
-        interactive_loop(index, extractor, args.top_k, args.threshold)
+        interactive_loop(index, extractor, args.top_k, args.threshold, args.show_terms)
     else:
-        run_query(args.query, index, extractor, args.top_k, args.threshold)
+        run_query(args.query, index, extractor, args.top_k, args.threshold, args.show_terms)
 
 
 if __name__ == "__main__":
