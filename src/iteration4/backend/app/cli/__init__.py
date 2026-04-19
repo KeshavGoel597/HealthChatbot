@@ -84,12 +84,12 @@ def load_index(args: argparse.Namespace) -> EmbeddingIndex:
 
 def run_query(query: str, index: EmbeddingIndex, extractor: TermExtractor, top_k: int, threshold: float, show_terms: bool = False) -> None:
     """Run a single query and print results."""
-    extracted = extractor.extract(query)
-    if show_terms:
-        print(f"\n  Extracted terms: {extracted.terms}")
     t0 = time.time()
+    extracted = extractor.extract(query)
     results = find_cuis(extracted.terms, index, top_k=top_k, threshold=threshold)
     elapsed_ms = (time.time() - t0) * 1000
+    if show_terms:
+        print(f"\n  Extracted terms: {extracted.terms}")
     print_results(query, results)
     print(f"  ({elapsed_ms:.0f}ms, {len(results)} results above {threshold} threshold)\n")
 
@@ -104,9 +104,9 @@ def run_terms_only(query: str, extractor: TermExtractor) -> None:
     print(f"  ({elapsed_ms:.0f}ms, terms-only mode)\n")
 
 
-def interactive_loop(index: EmbeddingIndex, extractor: TermExtractor, top_k: int, threshold: float, show_terms: bool = False) -> None:
-    """REPL: keep accepting queries until Ctrl-C or 'quit'."""
-    print("Interactive mode — type a query and press Enter. 'quit' or Ctrl-C to exit.\n")
+def _repl_loop(header: str, worker) -> None:
+    """Generic REPL: accept queries until Ctrl-C or 'quit', call worker(query) each time."""
+    print(f"{header} — type a query and press Enter. 'quit' or Ctrl-C to exit.\n")
     while True:
         try:
             query = input("query> ").strip()
@@ -116,22 +116,15 @@ def interactive_loop(index: EmbeddingIndex, extractor: TermExtractor, top_k: int
         if not query or query.lower() in ("quit", "exit", "q"):
             print("Bye.")
             break
-        run_query(query, index, extractor, top_k, threshold, show_terms)
+        worker(query)
+
+
+def interactive_loop(index: EmbeddingIndex, extractor: TermExtractor, top_k: int, threshold: float, show_terms: bool = False) -> None:
+    _repl_loop("Interactive mode", lambda q: run_query(q, index, extractor, top_k, threshold, show_terms))
 
 
 def interactive_terms_loop(extractor: TermExtractor) -> None:
-    """REPL for term extraction only."""
-    print("Interactive terms-only mode — type a query and press Enter. 'quit' or Ctrl-C to exit.\n")
-    while True:
-        try:
-            query = input("query> ").strip()
-        except (KeyboardInterrupt, EOFError):
-            print("\nBye.")
-            break
-        if not query or query.lower() in ("quit", "exit", "q"):
-            print("Bye.")
-            break
-        run_terms_only(query, extractor)
+    _repl_loop("Interactive terms-only mode", lambda q: run_terms_only(q, extractor))
 
 
 def main() -> None:

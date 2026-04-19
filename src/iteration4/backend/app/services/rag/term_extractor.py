@@ -13,7 +13,7 @@ for SapBERT CUI search than raw conversational text.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -139,14 +139,13 @@ class TermExtractor:
 
     def __init__(self, model_name: str = _DEFAULT_MODEL):
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        device_map = "auto" if torch.cuda.is_available() else "cpu"
+        cuda = torch.cuda.is_available()
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            device_map=device_map,
-            torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+            device_map="auto" if cuda else "cpu",
+            torch_dtype=torch.float16 if cuda else torch.float32,
         )
-        device_label = "GPU" if torch.cuda.is_available() else "CPU"
-        print(f"[TermExtractor] Loaded {model_name} on {device_label}")
+        print(f"[TermExtractor] Loaded {model_name} on {'GPU' if cuda else 'CPU'}")
 
     def extract(self, query: str) -> ExtractionResult:
         """Extract EMR categories and clinical terms from a natural language query.
