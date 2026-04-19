@@ -17,31 +17,56 @@ import json
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-_DEFAULT_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
+_DEFAULT_MODEL = "Qwen/Qwen3-1.7B"
 
 _SYSTEM_MSG = (
-    "Extract medical retrieval keywords. "
-    "Output only a valid JSON list of strings."
+    "You extract medical retrieval intent and terms. "
+    "Return only valid JSON."
 )
 
-_FEW_SHOT = """Extract medical keywords for retrieval.
+_FEW_SHOT = """Extract medical information for EMR retrieval.
+
+Return exactly one JSON object with:
+- "intent": one of "broad", "specific", "mixed"
+- "terms": a JSON list of strings
 
 Rules:
-- Output only a JSON list of strings.
-- Include symptoms, diagnoses, comorbidities, medications, labs, and history terms when relevant.
-- Normalize to standard medical terms; map colloquial phrases to clinical terms.
-- Ignore negated symptoms.
-- Keep useful detail (body part, laterality, pain quality, duration) when present.
-- If the query is about records/history/chart, prefer broad record categories over specific symptoms.
+- "broad" = user wants whole categories or records, not a specific symptom.
+  Use category terms such as: medications, diagnoses, comorbidities, labs, vitals, history, notes, allergies, procedures.
+- "specific" = user asks about a symptom, condition, medication, or lab value.
+- "mixed" = both broad category intent and specific clinical detail are present.
+- Remove negated terms.
+- Negation applies only to the phrase it directly modifies.
+- Normalize colloquial phrases to standard medical terms.
+- Keep useful details like body part or laterality when relevant.
+- Do not add symptoms that are not mentioned.
+- Do not output explanations or markdown.
 
-Text: "I have the runs and both of my knees are swollen."
-Output: ["diarrhea", "swollen knees"]
+Examples:
 
-Text: "My stomach hurts but I don't have any nausea or vomiting."
-Output: ["stomach ache"]
+Text: "I don't have body pain"
+Output: {"intent":"specific","terms":[]}
 
-Text: "Tell me about my medical history and records."
-Output: ["diagnosis", "comorbidity", "medications", "lab results", "symptoms", "patient history", "vitals", "discharge summary"]
+Text: "I don't have eye pain, but I do have finger pain"
+Output: {"intent":"specific","terms":["finger pain"]}
+
+Text: "No fever, but I have a cough"
+Output: {"intent":"specific","terms":["cough"]}
+
+Text: "Show my full medical history"
+Output: {"intent":"broad","terms":["history"]}
+
+Text: "List all my medications"
+Output: {"intent":"broad","terms":["medications"]}
+
+Text: "Tell me all my diagnoses"
+Output: {"intent":"broad","terms":["diagnoses","comorbidities"]}
+
+Text: "Show my diabetes medications"
+Output: {"intent":"mixed","terms":["medications","diabetes"]}
+
+Text: "Why is my HbA1c high?"
+Output: {"intent":"specific","terms":["high HbA1c"]}
 """
 
 
@@ -54,11 +79,14 @@ class TermExtractor:
 
     def __init__(self, model_name: str = _DEFAULT_MODEL):
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        device_map = "auto" if torch.cuda.is_available() else "cpu"
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            device_map="auto" if torch.cuda.is_available() else None,
+            device_map=device_map,
+            torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
         )
-        print(f"[TermExtractor] Loaded {model_name}")
+        device_label = "GPU" if torch.cuda.is_available() else "CPU"
+        print(f"[TermExtractor] Loaded {model_name} on {device_label}")
 
     def extract(self, query: str) -> list[str]:
         """Extract medical terms from a natural language query.
@@ -80,11 +108,18 @@ class TermExtractor:
 
         text = self.tokenizer.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True,
+            enable_thinking=False,
         )
         inputs = self.tokenizer([text], return_tensors="pt").to(self.model.device)
 
         output_ids = self.model.generate(
-            **inputs, max_new_tokens=50, do_sample=False,
+            **inputs,
+            max_new_tokens=80,
+            do_sample=True,
+            temperature=0.7,
+            top_p=0.8,
+            top_k=20,
+            min_p=0.0,
         )
 
         # Strip input tokens from output
