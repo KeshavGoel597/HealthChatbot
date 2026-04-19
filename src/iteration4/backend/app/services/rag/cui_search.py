@@ -1,52 +1,42 @@
 """
-CUI search: natural language query → relevant UMLS CUIs.
+CUI search: medical terms → relevant UMLS CUIs.
 
-Uses SapBERT semantic embeddings to map free-text queries
-(e.g. "my head hurts") to UMLS Concept Unique Identifiers
-(e.g. C0018681 = Headache).
+Uses SapBERT semantic embeddings to map a list of normalized medical terms
+(e.g. ["headache"]) to UMLS Concept Unique Identifiers.
 
-When a TermExtractor is provided, the raw query is first split
-into normalized medical terms (via Qwen LLM), then each term is
-searched independently and results are merged.  This dramatically
-improves recall for conversational queries.
+The caller (pipeline.py) extracts terms from the query before calling this
+function. Keeping extraction separate lets the pipeline route broad queries
+to a category filter without touching CUI search at all.
 """
 
 from __future__ import annotations
 
 from app.services.rag.embeddings import EmbeddingIndex
-from app.services.rag.term_extractor import TermExtractor
 
 
 def find_cuis(
-    query: str,
+    terms: list[str],
     index: EmbeddingIndex,
     top_k: int = 10,
     threshold: float = 0.7,
-    *,
-    extractor: TermExtractor,
 ) -> list[dict]:
-    """Find CUIs semantically matching a natural language query.
+    """Find CUIs semantically matching a list of medical terms.
 
-    The query is first decomposed into normalized medical terms
-    via the TermExtractor (Qwen LLM), e.g. "I have a headache,
-    what should I do?" → ["headache"].  Each term is searched
-    individually and results are merged by CUI, keeping the
-    highest score per CUI.
+    Each term is encoded and searched independently; results are merged
+    by CUI, keeping the highest score per CUI.
 
     Args:
-        query: Free-text input (e.g. "my head hurts")
-        index: Loaded EmbeddingIndex instance
-        top_k: Max candidates to retrieve from FAISS
-        threshold: Minimum cosine similarity to include
-        extractor: TermExtractor for pre-processing queries
+        terms: Normalized medical terms (e.g. ["headache", "nausea"]).
+               Pass an empty list to get an empty result without touching FAISS.
+        index: Loaded EmbeddingIndex instance (SapBERT + FAISS).
+        top_k: Max FAISS candidates to retrieve per term.
+        threshold: Minimum cosine similarity to include.
 
     Returns:
         List of dicts: [{"cui": "C0018681", "name": "Headache", "score": 0.856}, ...]
         Sorted by score descending. Empty list if nothing above threshold.
     """
-    terms = extractor.extract(query)
-
-    best: dict[str, dict] = {}  # cui → result dict (keep highest score)
+    best: dict[str, dict] = {}
 
     for term in terms:
         query_vec = index.encode(term)
@@ -54,11 +44,12 @@ def find_cuis(
 
         for cui, score in results:
             if score < threshold:
-                continue
+                break  # sorted descending, no need to continue
             if cui not in best or score > best[cui]["score"]:
                 best[cui] = {
                     "cui": cui,
                     "name": index.get_name(cui),
                     "score": round(score, 4),
                 }
+
     return sorted(best.values(), key=lambda r: r["score"], reverse=True)

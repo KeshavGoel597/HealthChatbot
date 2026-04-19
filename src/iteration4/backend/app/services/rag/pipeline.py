@@ -57,7 +57,7 @@ def run_pipeline(
     graph: KnowledgeGraph,
     *,
     patient_id: str = "",
-    extractor: TermExtractor,
+    extractor: TermExtractor | None,
     seed_top_k: int = 10,
     seed_threshold: float = 0.7,
     graph_depth: int = 2,
@@ -74,9 +74,10 @@ def run_pipeline(
         index: Pre-loaded EmbeddingIndex.
         graph: Pre-loaded KnowledgeGraph.
         patient_id: Patient identifier for the prompt.
-        extractor: Optional TermExtractor (Qwen LLM) for query
-                   decomposition.  Improves CUI recall on
-                   conversational queries.
+        extractor: TermExtractor (Qwen LLM) for query decomposition.
+                   Improves CUI recall on conversational queries.
+                   If None, falls back to using the raw query as the
+                   seed term (skips find_cuis entirely).
         seed_top_k: Phase 1 FAISS candidates.
         seed_threshold: Phase 1 minimum cosine similarity.
         graph_depth: Phase 2 BFS depth.
@@ -89,10 +90,20 @@ def run_pipeline(
         PipelineResult with all phase outputs.
     """
     # ── Phase 1: Seed CUI extraction ──
-    seeds = find_cuis(
-        query, index, top_k=seed_top_k,
-        threshold=seed_threshold, extractor=extractor,
-    )
+    if extractor is None:
+        # Degraded path: no LLM query decomposition available — skip RAG entirely
+        # and return an empty-context prompt. Running graph expansion with a raw
+        # natural-language string as a pseudo-CUI does no useful work.
+        context_text = assemble_context([])
+        system_prompt = assemble_prompt(query, [], patient_id=patient_id, context=context_text)
+        return PipelineResult(
+            seed_cuis=[], expanded_cui_count=0, expanded_cuis=[],
+            matches=[], system_prompt=system_prompt, context_text=context_text,
+            total_sections=0,
+        )
+
+    extracted = extractor.extract(query)
+    seeds = find_cuis(extracted.terms, index, top_k=seed_top_k, threshold=seed_threshold)
     seed_cuis = [s["cui"] for s in seeds]
 
     # ── Phase 2: Graph expansion ──

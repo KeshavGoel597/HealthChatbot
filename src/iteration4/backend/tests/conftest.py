@@ -4,6 +4,7 @@ import os
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 from fastapi.testclient import TestClient
+from app.services.rag.term_extractor import ExtractionResult
 
 
 @pytest.fixture
@@ -26,9 +27,11 @@ def mock_graph():
 
 @pytest.fixture
 def mock_extractor():
-    """TermExtractor stub — returns single generic term."""
+    """TermExtractor stub — returns a single generic specific term."""
     m = MagicMock()
-    m.extract.return_value = ["mock term"]
+    m.extract.return_value = ExtractionResult(
+        intent="specific", categories=[], terms=["mock term"]
+    )
     return m
 
 
@@ -59,7 +62,9 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr("app.main.KnowledgeGraph", lambda *a, **kw: MagicMock())
     monkeypatch.setattr(
         "app.main.TermExtractor",
-        lambda *a, **kw: MagicMock(extract=lambda q: []),
+        lambda *a, **kw: MagicMock(
+            extract=lambda q: ExtractionResult(intent="specific", categories=[], terms=[])
+        ),
     )
     monkeypatch.setattr("app.routers.sessions.run_retention_cleanup", lambda: None)
     monkeypatch.setattr("app.routers.sessions.sarvam_service", MagicMock(
