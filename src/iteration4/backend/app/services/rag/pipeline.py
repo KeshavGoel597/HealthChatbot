@@ -28,6 +28,24 @@ from app.services.rag.emr_match import match_sections, MatchedSection
 from app.services.rag.prompt import assemble_prompt, assemble_context
 
 
+def _sections_for_categories(
+    categories: list[str], sections: list[EMRSection]
+) -> list[MatchedSection]:
+    """Return all EMR sections whose category is in the given list.
+
+    Used for broad-intent queries where the LLM identifies which EMR
+    record types the user wants (e.g. ["medicine", "lab"]). No CUI
+    search or embedding lookup is needed — we filter directly by the
+    section.category string set by the EMR parser.
+    """
+    target = set(categories)
+    return [
+        MatchedSection(section=s, matched_cuis=[], best_score=1.0)
+        for s in sections
+        if s.category in target
+    ]
+
+
 @dataclass
 class PipelineResult:
     """Output of a full RAG pipeline run."""
@@ -89,11 +107,8 @@ def run_pipeline(
     Returns:
         PipelineResult with all phase outputs.
     """
-    # ── Phase 1: Seed CUI extraction ──
+    # ── Degraded path: no LLM extractor available ──
     if extractor is None:
-        # Degraded path: no LLM query decomposition available — skip RAG entirely
-        # and return an empty-context prompt. Running graph expansion with a raw
-        # natural-language string as a pseudo-CUI does no useful work.
         context_text = assemble_context([])
         system_prompt = assemble_prompt(query, [], patient_id=patient_id, context=context_text)
         return PipelineResult(
@@ -102,9 +117,18 @@ def run_pipeline(
             total_sections=0,
         )
 
+    # ── Classify query ──
     extracted = extractor.extract(query)
-    seeds = find_cuis(extracted.terms, index, top_k=seed_top_k, threshold=seed_threshold)
-    seed_cuis = [s["cui"] for s in seeds]
+
+    # ── Phase 1: Seed CUI extraction (specific clinical terms only) ──
+    if extracted.intent in ("specific", "mixed") and extracted.terms:
+        seeds = find_cuis(
+            extracted.terms, index, top_k=seed_top_k, threshold=seed_threshold,
+        )
+        seed_cuis = [s["cui"] for s in seeds]
+    else:
+        seeds = []
+        seed_cuis = []
 
     # ── Phase 2: Graph expansion ──
     if seed_cuis:
@@ -122,13 +146,28 @@ def run_pipeline(
     if dedup:
         sections = deduplicate_sections(sections)
 
-    if expanded_set:
-        matches = match_sections(
+    # CUI-based matches (specific/mixed path)
+    cui_matches = (
+        match_sections(
             sections, expanded_set, index,
             top_k=match_top_k, threshold=match_threshold,
         )
-    else:
-        matches = []
+        if expanded_set else []
+    )
+
+    # Category-based matches (broad/mixed path)
+    category_matches = (
+        _sections_for_categories(extracted.categories, sections)
+        if extracted.intent in ("broad", "mixed") and extracted.categories else []
+    )
+
+    # Merge: CUI matches first, then category matches not already covered
+    seen_texts = {m.section.text for m in cui_matches}
+    matches = list(cui_matches)
+    for m in category_matches:
+        if m.section.text not in seen_texts:
+            matches.append(m)
+            seen_texts.add(m.section.text)
 
     # ── Phase 4: Prompt assembly ──
     context_text = assemble_context(matches)

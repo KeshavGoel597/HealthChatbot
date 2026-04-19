@@ -110,6 +110,26 @@ def no_match_extractor():
     return m
 
 
+@pytest.fixture
+def broad_extractor():
+    """TermExtractor mock — broad intent, no clinical terms."""
+    m = MagicMock()
+    m.extract.return_value = ExtractionResult(
+        intent="broad", categories=["medicine"], terms=[]
+    )
+    return m
+
+
+@pytest.fixture
+def mixed_extractor():
+    """TermExtractor mock — mixed intent with category + clinical term."""
+    m = MagicMock()
+    m.extract.return_value = ExtractionResult(
+        intent="mixed", categories=["medicine"], terms=["diabetes"]
+    )
+    return m
+
+
 def _build_long_emr() -> dict:
     """Generate a long EMR with many noisy sections and one nuanced relevant note."""
     prescriptions = [
@@ -665,3 +685,76 @@ class TestDistinctEMRMetrics:
         emr_path = emr_case_file(case)
         index, graph, extractor = _mock_pipeline_resources(case)
         _measure_case_phases(case, emr_path, index, graph, extractor)
+
+
+class TestBroadIntentRouting:
+    def test_broad_returns_medicine_sections_without_cui_search(
+        self, emr_file, matching_index, matching_graph, broad_extractor
+    ):
+        """Broad 'medicine' category returns all medicine sections; no CUI seeds."""
+        result = run_pipeline(
+            query="List my medications",
+            emr_path=emr_file,
+            index=matching_index,
+            graph=matching_graph,
+            extractor=broad_extractor,
+        )
+        assert result.seed_cuis == []
+        assert result.expanded_cui_count == 0
+        medicine = [m for m in result.matches if m.section.category == "medicine"]
+        assert len(medicine) >= 2  # SYNTHETIC_EMR has Metformin + Glipizide
+
+    def test_broad_skips_faiss_entirely(
+        self, emr_file, matching_index, matching_graph, broad_extractor
+    ):
+        """Phase 1 + Phase 3 CUI path both skipped — encode never called."""
+        run_pipeline(
+            query="List my medications",
+            emr_path=emr_file,
+            index=matching_index,
+            graph=matching_graph,
+            extractor=broad_extractor,
+        )
+        matching_index.encode.assert_not_called()
+
+    def test_broad_prompt_contains_medication_section(
+        self, emr_file, matching_index, matching_graph, broad_extractor
+    ):
+        result = run_pipeline(
+            query="List my medications",
+            emr_path=emr_file,
+            index=matching_index,
+            graph=matching_graph,
+            extractor=broad_extractor,
+        )
+        assert "Medications" in result.system_prompt
+        assert "Metformin" in result.system_prompt
+
+    def test_mixed_runs_cui_search_and_category_filter(
+        self, emr_file, matching_index, matching_graph, mixed_extractor
+    ):
+        """Mixed: CUI search runs for 'diabetes'; category filter adds medicine sections."""
+        result = run_pipeline(
+            query="Show my diabetes medications",
+            emr_path=emr_file,
+            index=matching_index,
+            graph=matching_graph,
+            extractor=mixed_extractor,
+        )
+        assert len(result.seed_cuis) > 0
+        medicine = [m for m in result.matches if m.section.category == "medicine"]
+        assert len(medicine) >= 2
+
+    def test_mixed_no_duplicate_sections(
+        self, emr_file, matching_index, matching_graph, mixed_extractor
+    ):
+        """Merged result set must not contain the same section text twice."""
+        result = run_pipeline(
+            query="Show my diabetes medications",
+            emr_path=emr_file,
+            index=matching_index,
+            graph=matching_graph,
+            extractor=mixed_extractor,
+        )
+        texts = [m.section.text for m in result.matches]
+        assert len(texts) == len(set(texts))
