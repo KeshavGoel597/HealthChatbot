@@ -109,69 +109,62 @@ def test_assemble_prompt_no_missing_spaces():
     assert "you must " in result
 
 
-from app.services.rag.term_extractor import ExtractionResult, _parse_extraction_response
+from app.services.rag.term_extractor import _parse_categories, _parse_terms, _compute_intent
 
 
-class TestParseExtractionResponse:
-    def test_specific_intent_has_terms_no_categories(self):
-        r = _parse_extraction_response(
-            '{"intent":"specific","categories":[],"terms":["headache"]}', "q"
-        )
-        assert r.intent == "specific"
-        assert r.terms == ["headache"]
-        assert r.categories == []
+class TestParseCategories:
+    def test_valid_category_returned(self):
+        assert _parse_categories('{"categories":["medicine"]}') == ["medicine"]
 
-    def test_broad_intent_has_categories_no_terms(self):
-        r = _parse_extraction_response(
-            '{"intent":"broad","categories":["medicine"],"terms":[]}', "q"
-        )
-        assert r.intent == "broad"
-        assert r.categories == ["medicine"]
-        assert r.terms == []
-
-    def test_mixed_intent_has_both(self):
-        r = _parse_extraction_response(
-            '{"intent":"mixed","categories":["medicine"],"terms":["diabetes"]}', "q"
-        )
-        assert r.intent == "mixed"
-        assert r.categories == ["medicine"]
-        assert r.terms == ["diabetes"]
-
-    def test_invalid_category_strings_are_dropped(self):
-        r = _parse_extraction_response(
-            '{"intent":"broad","categories":["medicine","laboratory","bogus"],"terms":[]}', "q"
-        )
-        assert r.categories == ["medicine"]  # "laboratory" and "bogus" are not valid
-
-    def test_unknown_intent_defaults_to_specific(self):
-        r = _parse_extraction_response(
-            '{"intent":"whatever","categories":[],"terms":["x"]}', "q"
-        )
-        assert r.intent == "specific"
-
-    def test_invalid_json_falls_back_to_query(self):
-        r = _parse_extraction_response("not json at all", "my query")
-        assert r.intent == "specific"
-        assert r.terms == ["my query"]
-        assert r.categories == []
-
-    def test_flat_list_response_treated_as_specific_terms(self):
-        r = _parse_extraction_response('["headache","nausea"]', "q")
-        assert r.intent == "specific"
-        assert r.terms == ["headache", "nausea"]
-        assert r.categories == []
-
-    def test_blank_terms_stripped(self):
-        r = _parse_extraction_response(
-            '{"intent":"specific","categories":[],"terms":["  ","headache"]}', "q"
-        )
-        assert r.terms == ["headache"]
+    def test_invalid_categories_dropped(self):
+        result = _parse_categories('{"categories":["medicine","laboratory","bogus"]}')
+        assert result == ["medicine"]
 
     def test_multiple_valid_categories(self):
-        r = _parse_extraction_response(
-            '{"intent":"broad","categories":["diagnosis","comorbidity"],"terms":[]}', "q"
-        )
-        assert set(r.categories) == {"diagnosis", "comorbidity"}
+        result = _parse_categories('{"categories":["diagnosis","comorbidity"]}')
+        assert set(result) == {"diagnosis", "comorbidity"}
+
+    def test_empty_array_returns_empty(self):
+        assert _parse_categories('{"categories":[]}') == []
+
+    def test_invalid_json_returns_empty(self):
+        assert _parse_categories("not json") == []
+
+    def test_non_dict_json_returns_empty(self):
+        assert _parse_categories('["medicine"]') == []
+
+
+class TestParseTerms:
+    def test_terms_returned(self):
+        assert _parse_terms('{"terms":["headache"]}') == ["headache"]
+
+    def test_blank_terms_stripped(self):
+        result = _parse_terms('{"terms":["  ","headache"]}')
+        assert result == ["headache"]
+
+    def test_multiple_terms(self):
+        result = _parse_terms('{"terms":["headache","nausea"]}')
+        assert result == ["headache", "nausea"]
+
+    def test_empty_array_returns_empty(self):
+        assert _parse_terms('{"terms":[]}') == []
+
+    def test_invalid_json_returns_empty(self):
+        assert _parse_terms("not json") == []
+
+
+class TestComputeIntent:
+    def test_terms_only_is_specific(self):
+        assert _compute_intent([], ["headache"]) == "specific"
+
+    def test_categories_only_is_broad(self):
+        assert _compute_intent(["medicine"], []) == "broad"
+
+    def test_both_is_mixed(self):
+        assert _compute_intent(["medicine"], ["diabetes"]) == "mixed"
+
+    def test_both_empty_is_specific(self):
+        assert _compute_intent([], []) == "specific"
 
 
 from app.services.rag.pipeline import _sections_for_categories

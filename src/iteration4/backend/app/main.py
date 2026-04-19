@@ -31,20 +31,8 @@ async def lifespan(app: FastAPI):
     app.state.term_extractor = TermExtractor()
 
     # Startup: initialize Presidio engines for outbound LLM prompt de-identification
-    app.state.presidio_analyzer = None
-    app.state.presidio_anonymizer = None
-    try:
-        from presidio_anonymizer import AnonymizerEngine
-        app.state.presidio_anonymizer = AnonymizerEngine()
-    except Exception as exc:
-        logger.warning("Presidio anonymizer initialization failed. De-identification will be skipped: %s", exc)
-
-    try:
-        from presidio_analyzer import AnalyzerEngine
-
-        app.state.presidio_analyzer = AnalyzerEngine()
-    except Exception as exc:
-        logger.warning("Presidio analyzer initialization failed. Falling back to limited de-identification: %s", exc)
+    from app.services.presidio_anonymizer import init_presidio_engines
+    app.state.presidio_analyzer, app.state.presidio_anonymizer = init_presidio_engines()
 
     if app.state.presidio_analyzer is not None and app.state.presidio_anonymizer is not None:
         print("[STARTUP] Presidio analyzer/anonymizer initialized.")

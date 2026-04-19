@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from app.services.rag.embeddings import EmbeddingIndex
 from app.services.rag.graph import KnowledgeGraph
 from app.services.rag.cui_search import find_cuis
-from app.services.rag.term_extractor import TermExtractor
+from app.services.rag.term_extractor import ExtractionResult, TermExtractor
 from app.services.rag.graph_expand import DIAGNOSTIC_RELATIONS, expand_cuis
 from app.services.rag.emr import (
     parse_emr_file,
@@ -67,6 +67,9 @@ class PipelineResult:
     # Sections parsed from EMR (for debugging / logging)
     total_sections: int
 
+    # Term extractor output
+    extraction: ExtractionResult
+
 
 def run_pipeline(
     query: str,
@@ -75,7 +78,7 @@ def run_pipeline(
     graph: KnowledgeGraph,
     *,
     patient_id: str = "",
-    extractor: TermExtractor | None,
+    extractor: TermExtractor | None = None,
     seed_top_k: int = 10,
     seed_threshold: float = 0.7,
     graph_depth: int = 2,
@@ -115,6 +118,7 @@ def run_pipeline(
             seed_cuis=[], expanded_cui_count=0, expanded_cuis=[],
             matches=[], system_prompt=system_prompt, context_text=context_text,
             total_sections=0,
+            extraction=ExtractionResult(intent="specific", categories=[], terms=[]),
         )
 
     # ── Classify query ──
@@ -181,4 +185,5 @@ def run_pipeline(
         system_prompt=system_prompt,
         context_text=context_text,
         total_sections=len(sections),
+        extraction=extracted,
     )

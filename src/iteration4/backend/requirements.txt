@@ -13,3 +13,4 @@ pydantic
 presidio-analyzer
 presidio-anonymizer
 ollama
+bitsandbytes

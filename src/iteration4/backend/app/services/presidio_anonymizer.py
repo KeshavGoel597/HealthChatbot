@@ -4,17 +4,38 @@ from typing import Any, Dict, Iterable, List
 
 logger = logging.getLogger(__name__)
 
+def init_presidio_engines() -> tuple[Any, Any]:
+    """Initialize Presidio analyzer/anonymizer engines, tolerating missing deps.
+
+    Returns (analyzer, anonymizer); either may be None if its package failed to import.
+    """
+    analyzer = None
+    anonymizer = None
+    try:
+        from presidio_anonymizer import AnonymizerEngine
+        anonymizer = AnonymizerEngine()
+    except Exception as exc:
+        logger.warning("Presidio anonymizer initialization failed. De-identification will be skipped: %s", exc)
+    try:
+        from presidio_analyzer import AnalyzerEngine
+        analyzer = AnalyzerEngine()
+    except Exception as exc:
+        logger.warning("Presidio analyzer initialization failed. Falling back to limited de-identification: %s", exc)
+    return analyzer, anonymizer
+
+
 DEFAULT_PII_ENTITIES = [
     "PERSON",
     "PHONE_NUMBER",
     "EMAIL_ADDRESS",
     "LOCATION",
-    "DATE_TIME",
     "URL",
     "IP_ADDRESS",
     "US_SSN",
     "CREDIT_CARD",
     "IBAN_CODE",
+    "IN_PAN",
+    "IN_AADHAAR",
 ]
 
 _NAME_INTRO_PATTERN = re.compile(
@@ -26,7 +47,7 @@ _NAME_INTRO_PATTERN = re.compile(
 def _fallback_analyzer_results(text: str) -> list:
     """Create limited Presidio-compatible results when AnalyzerEngine is unavailable."""
     try:
-        from presidio_analyzer import RecognizerResult
+        from presidio_anonymizer.entities import RecognizerResult
     except Exception:
         return []
 
@@ -60,12 +81,25 @@ def _merge_results(primary: list, secondary: list) -> list:
     merged = []
     seen = set()
     for item in (primary or []) + (secondary or []):
-        key = (getattr(item, "entity_type", None), getattr(item, "start", None), getattr(item, "end", None))
+        if isinstance(item, dict):
+            entity_type = item.get("entity_type")
+            start = item.get("start")
+            end = item.get("end")
+        else:
+            entity_type = getattr(item, "entity_type", None)
+            start = getattr(item, "start", None)
+            end = getattr(item, "end", None)
+
+        key = (entity_type, start, end)
         if key in seen:
             continue
         seen.add(key)
         merged.append(item)
     return merged
+
+
+def _count_regex_fallback_replacements(text: str) -> int:
+    return sum(1 for _ in _NAME_INTRO_PATTERN.finditer(text or ""))
 
 
 def count_anonymized_replacements(
@@ -77,8 +111,11 @@ def count_anonymized_replacements(
     entities: Iterable[str] = DEFAULT_PII_ENTITIES,
 ) -> int:
     """Return number of detected/anonymized entities for observability."""
-    if not text or anonymizer is None:
+    if not text:
         return 0
+
+    if anonymizer is None:
+        return _count_regex_fallback_replacements(text)
 
     try:
         if analyzer is not None:
@@ -111,6 +148,7 @@ def anonymize_text_for_llm(
         return text
 
     if anonymizer is None:
+        logger.warning("Presidio anonymizer unavailable; using regex-only fallback (limited PII coverage) for this request.")
         return _regex_only_fallback_anonymize(text)
 
     try:
