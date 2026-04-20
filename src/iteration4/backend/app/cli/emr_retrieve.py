@@ -63,6 +63,13 @@ def _default_path(filename: str) -> str:
 
 # ── Display functions ─────────────────────────────────────────────────
 
+def print_extraction(extraction) -> None:
+    print(f"\n  {C.BOLD}═══ Term Extraction ═══{C.RESET}")
+    print(f"  Intent:     {C.CYAN}{extraction.intent}{C.RESET}")
+    print(f"  Categories: {C.MAGENTA}{extraction.categories}{C.RESET}")
+    print(f"  Terms:      {C.YELLOW}{extraction.terms}{C.RESET}\n")
+
+
 def print_phase1(query: str, results: list[dict]) -> None:
     print(f"\n  {C.BOLD}═══ Phase 1: Seed CUI Extraction ═══{C.RESET}")
     print(f'  Query: {C.WHITE}"{query}"{C.RESET}\n')
@@ -208,13 +215,10 @@ def main() -> None:
     print(f"  {C.DIM}EMR: {result.total_sections} sections from {args.emr}{C.RESET}")
 
     # ── Display phases ──
+    print_extraction(result.extraction)
     print_phase1(args.query, result.seed_cuis)
-
-    if not result.seed_cuis:
-        print(f"  {C.RED}No seed CUIs — aborting.{C.RESET}")
-        return
-
-    print_phase2(result.expanded_cuis)
+    if result.expanded_cuis:
+        print_phase2(result.expanded_cuis)
     print_phase3(result.matches, index.get_name)
 
     # ── Phase 4: Prompt ──

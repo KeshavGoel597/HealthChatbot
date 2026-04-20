@@ -192,7 +192,8 @@ def main() -> None:
         print(f"  {C.DIM}Ready in {time.time() - t0:.1f}s{C.RESET}")
 
         extractor = TermExtractor()
-        phase1_results = find_cuis(args.query, index, top_k=args.top_k, threshold=args.threshold, extractor=extractor)
+        extracted = extractor.extract(args.query)
+        phase1_results = find_cuis(extracted.terms, index, top_k=args.top_k, threshold=args.threshold)
         print_phase1(args.query, phase1_results)
 
         seed_cuis = [r["cui"] for r in phase1_results]

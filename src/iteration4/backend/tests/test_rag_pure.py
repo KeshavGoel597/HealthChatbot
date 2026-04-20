@@ -107,3 +107,115 @@ def test_assemble_prompt_no_missing_spaces():
     assert "questionyou" not in result
     # Verify the key sentence has proper spacing
     assert "you must " in result
+
+
+from app.services.rag.term_extractor import _parse_categories, _parse_terms, _compute_intent
+
+
+class TestParseCategories:
+    def test_valid_category_returned(self):
+        assert _parse_categories('{"categories":["medicine"]}') == ["medicine"]
+
+    def test_invalid_categories_dropped(self):
+        result = _parse_categories('{"categories":["medicine","laboratory","bogus"]}')
+        assert result == ["medicine"]
+
+    def test_multiple_valid_categories(self):
+        result = _parse_categories('{"categories":["diagnosis","comorbidity"]}')
+        assert set(result) == {"diagnosis", "comorbidity"}
+
+    def test_empty_array_returns_empty(self):
+        assert _parse_categories('{"categories":[]}') == []
+
+    def test_invalid_json_returns_empty(self):
+        assert _parse_categories("not json") == []
+
+    def test_non_dict_json_returns_empty(self):
+        assert _parse_categories('["medicine"]') == []
+
+
+class TestParseTerms:
+    def test_terms_returned(self):
+        assert _parse_terms('{"terms":["headache"]}') == ["headache"]
+
+    def test_blank_terms_stripped(self):
+        result = _parse_terms('{"terms":["  ","headache"]}')
+        assert result == ["headache"]
+
+    def test_multiple_terms(self):
+        result = _parse_terms('{"terms":["headache","nausea"]}')
+        assert result == ["headache", "nausea"]
+
+    def test_empty_array_returns_empty(self):
+        assert _parse_terms('{"terms":[]}') == []
+
+    def test_invalid_json_returns_empty(self):
+        assert _parse_terms("not json") == []
+
+
+class TestComputeIntent:
+    def test_terms_only_is_specific(self):
+        assert _compute_intent([], ["headache"]) == "specific"
+
+    def test_categories_only_is_broad(self):
+        assert _compute_intent(["medicine"], []) == "broad"
+
+    def test_both_is_mixed(self):
+        assert _compute_intent(["medicine"], ["diabetes"]) == "mixed"
+
+    def test_both_empty_is_specific(self):
+        assert _compute_intent([], []) == "specific"
+
+
+from app.services.rag.pipeline import _sections_for_categories
+
+
+class TestSectionsForCategories:
+    def _section(self, category, text):
+        return EMRSection(category=category, text=text)
+
+    def test_medicine_category_selects_medicine_sections(self):
+        sections = [
+            self._section("medicine", "Metformin 500mg"),
+            self._section("medicine", "Glipizide 5mg"),
+            self._section("lab", "HbA1c"),
+        ]
+        matches = _sections_for_categories(["medicine"], sections)
+        assert len(matches) == 2
+        assert all(m.section.category == "medicine" for m in matches)
+
+    def test_matched_sections_have_score_1_and_empty_cuis(self):
+        sections = [self._section("medicine", "Metformin")]
+        matches = _sections_for_categories(["medicine"], sections)
+        assert matches[0].best_score == 1.0
+        assert matches[0].matched_cuis == []
+
+    def test_unknown_category_returns_empty(self):
+        sections = [self._section("medicine", "Metformin")]
+        matches = _sections_for_categories(["nonexistent"], sections)
+        assert matches == []
+
+    def test_empty_categories_returns_empty(self):
+        sections = [self._section("medicine", "Metformin")]
+        matches = _sections_for_categories([], sections)
+        assert matches == []
+
+    def test_lab_category_selects_lab_sections(self):
+        sections = [
+            self._section("lab", "HbA1c"),
+            self._section("lab", "RBS"),
+            self._section("medicine", "Metformin"),
+        ]
+        matches = _sections_for_categories(["lab"], sections)
+        assert len(matches) == 2
+        assert all(m.section.category == "lab" for m in matches)
+
+    def test_multiple_categories_selects_from_all(self):
+        sections = [
+            self._section("medicine", "Metformin"),
+            self._section("lab", "HbA1c"),
+            self._section("diagnosis", "Type 2 Diabetes"),
+        ]
+        matches = _sections_for_categories(["medicine", "lab"], sections)
+        assert len(matches) == 2
+        assert {m.section.category for m in matches} == {"medicine", "lab"}

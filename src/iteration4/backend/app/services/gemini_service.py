@@ -53,6 +53,14 @@ GDPR_EMR_READONLY_NOTE = (
 )
 
 
+def build_emr_system_prompt(clinical_context: str) -> str:
+    """Wrap EMR clinical context in the canonical patient-consented, read-only header."""
+    return (
+        f"PATIENT EMR CONTEXT (consented by patient, read-only):\n{clinical_context}\n\n"
+        f"{GDPR_EMR_READONLY_NOTE}"
+    )
+
+
 class GeminiService:
     def __init__(self):
         self.api_key = os.getenv("GEMINI_API_KEY")
@@ -185,10 +193,7 @@ class GeminiService:
             raw_data = self.get_patient_data(patient_id)
             clinical_context_raw, emr_fields_used = await self.extract_clinical_data(raw_data)
             clinical_context = clinical_context_raw if clinical_context_raw != "[]" else raw_data
-            emr_section = (
-                f"PATIENT EMR CONTEXT (consented by patient, read-only):\n{clinical_context}\n\n"
-                f"{GDPR_EMR_READONLY_NOTE}"
-            )
+            emr_section = build_emr_system_prompt(clinical_context)
         else:
             emr_section = (
                 "EMR ACCESS: The patient has NOT consented to EMR data access for this session. "

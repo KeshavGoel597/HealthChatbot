@@ -28,6 +28,7 @@ from app.services.rag.graph_expand import expand_cuis, DIAGNOSTIC_RELATIONS
 from app.services.rag.emr_match import match_sections
 from app.services.rag.prompt import assemble_prompt
 from app.services.rag.pipeline import run_pipeline, PipelineResult
+from app.services.rag.term_extractor import ExtractionResult
 
 
 # ── Synthetic EMR ──────────────────────────────────────────────────────
@@ -91,9 +92,11 @@ def matching_graph():
 
 @pytest.fixture
 def matching_extractor():
-    """TermExtractor mock that returns ['diabetes'] for any query."""
+    """TermExtractor mock that returns specific intent with ['diabetes']."""
     m = MagicMock()
-    m.extract.return_value = ["diabetes"]
+    m.extract.return_value = ExtractionResult(
+        intent="specific", categories=[], terms=["diabetes"]
+    )
     return m
 
 
@@ -101,7 +104,29 @@ def matching_extractor():
 def no_match_extractor():
     """TermExtractor mock that returns no terms → no seeds → no matches."""
     m = MagicMock()
-    m.extract.return_value = []
+    m.extract.return_value = ExtractionResult(
+        intent="specific", categories=[], terms=[]
+    )
+    return m
+
+
+@pytest.fixture
+def broad_extractor():
+    """TermExtractor mock — broad intent, no clinical terms."""
+    m = MagicMock()
+    m.extract.return_value = ExtractionResult(
+        intent="broad", categories=["medicine"], terms=[]
+    )
+    return m
+
+
+@pytest.fixture
+def mixed_extractor():
+    """TermExtractor mock — mixed intent with category + clinical term."""
+    m = MagicMock()
+    m.extract.return_value = ExtractionResult(
+        intent="mixed", categories=["medicine"], terms=["diabetes"]
+    )
     return m
 
 
@@ -236,7 +261,9 @@ def distinct_case_specs():
 def _mock_pipeline_resources(case: dict):
     """Create index/graph/extractor mocks tailored to one scenario."""
     extractor = MagicMock()
-    extractor.extract.return_value = case["extract_terms"]
+    extractor.extract.return_value = ExtractionResult(
+        intent="specific", categories=[], terms=case["extract_terms"]
+    )
 
     index = MagicMock()
     index.encode.side_effect = lambda text: text
@@ -295,11 +322,8 @@ def _assert_case_relevance(case: dict, result: PipelineResult):
 def _measure_case_phases(case: dict, emr_path: str, index, graph, extractor):
     """Measure and print per-phase timing for one scenario."""
     t0 = time.perf_counter()
-    seeds = find_cuis(
-        case["query"], index,
-        top_k=10, threshold=0.7,
-        extractor=extractor,
-    )
+    extracted = extractor.extract(case["query"])
+    seeds = find_cuis(extracted.terms, index, top_k=10, threshold=0.7)
     phase1_ms = (time.perf_counter() - t0) * 1000
     seed_cuis = [s["cui"] for s in seeds]
 
@@ -347,6 +371,23 @@ def _measure_case_phases(case: dict, emr_path: str, index, graph, extractor):
     assert phase3_ms < 5000, f"Phase 3 took {phase3_ms:.2f}ms (> 5s)"
     assert phase4_ms < 5000, f"Phase 4 took {phase4_ms:.2f}ms (> 5s)"
     assert token_est > 0
+
+
+# ── TestFindCuisSignature ──────────────────────────────────────────────
+
+class TestFindCuisSignature:
+    """find_cuis accepts list[str] directly — no extractor param."""
+
+    def test_accepts_terms_list(self, matching_index):
+        from app.services.rag.cui_search import find_cuis
+        results = find_cuis(["diabetes"], matching_index, top_k=10, threshold=0.7)
+        assert isinstance(results, list)
+
+    def test_empty_terms_returns_empty(self, matching_index):
+        from app.services.rag.cui_search import find_cuis
+        results = find_cuis([], matching_index, top_k=10, threshold=0.7)
+        assert results == []
+        matching_index.encode.assert_not_called()
 
 
 # ── TestEMRParsing ─────────────────────────────────────────────────────
@@ -478,11 +519,8 @@ class TestPipelineMetrics:
         """Call each phase function individually and report timing."""
         # Phase 1: seed CUI extraction
         t0 = time.perf_counter()
-        seeds = find_cuis(
-            self._QUERY, matching_index,
-            top_k=10, threshold=0.7,
-            extractor=matching_extractor,
-        )
+        extracted = matching_extractor.extract(self._QUERY)
+        seeds = find_cuis(extracted.terms, matching_index, top_k=10, threshold=0.7)
         phase1_ms = (time.perf_counter() - t0) * 1000
 
         seed_cuis = [s["cui"] for s in seeds]
@@ -647,3 +685,76 @@ class TestDistinctEMRMetrics:
         emr_path = emr_case_file(case)
         index, graph, extractor = _mock_pipeline_resources(case)
         _measure_case_phases(case, emr_path, index, graph, extractor)
+
+
+class TestBroadIntentRouting:
+    def test_broad_returns_medicine_sections_without_cui_search(
+        self, emr_file, matching_index, matching_graph, broad_extractor
+    ):
+        """Broad 'medicine' category returns all medicine sections; no CUI seeds."""
+        result = run_pipeline(
+            query="List my medications",
+            emr_path=emr_file,
+            index=matching_index,
+            graph=matching_graph,
+            extractor=broad_extractor,
+        )
+        assert result.seed_cuis == []
+        assert result.expanded_cui_count == 0
+        medicine = [m for m in result.matches if m.section.category == "medicine"]
+        assert len(medicine) >= 2  # SYNTHETIC_EMR has Metformin + Glipizide
+
+    def test_broad_skips_faiss_entirely(
+        self, emr_file, matching_index, matching_graph, broad_extractor
+    ):
+        """Phase 1 + Phase 3 CUI path both skipped — encode never called."""
+        run_pipeline(
+            query="List my medications",
+            emr_path=emr_file,
+            index=matching_index,
+            graph=matching_graph,
+            extractor=broad_extractor,
+        )
+        matching_index.encode.assert_not_called()
+
+    def test_broad_prompt_contains_medication_section(
+        self, emr_file, matching_index, matching_graph, broad_extractor
+    ):
+        result = run_pipeline(
+            query="List my medications",
+            emr_path=emr_file,
+            index=matching_index,
+            graph=matching_graph,
+            extractor=broad_extractor,
+        )
+        assert "Medications" in result.system_prompt
+        assert "Metformin" in result.system_prompt
+
+    def test_mixed_runs_cui_search_and_category_filter(
+        self, emr_file, matching_index, matching_graph, mixed_extractor
+    ):
+        """Mixed: CUI search runs for 'diabetes'; category filter adds medicine sections."""
+        result = run_pipeline(
+            query="Show my diabetes medications",
+            emr_path=emr_file,
+            index=matching_index,
+            graph=matching_graph,
+            extractor=mixed_extractor,
+        )
+        assert len(result.seed_cuis) > 0
+        medicine = [m for m in result.matches if m.section.category == "medicine"]
+        assert len(medicine) >= 2
+
+    def test_mixed_no_duplicate_sections(
+        self, emr_file, matching_index, matching_graph, mixed_extractor
+    ):
+        """Merged result set must not contain the same section text twice."""
+        result = run_pipeline(
+            query="Show my diabetes medications",
+            emr_path=emr_file,
+            index=matching_index,
+            graph=matching_graph,
+            extractor=mixed_extractor,
+        )
+        texts = [m.section.text for m in result.matches]
+        assert len(texts) == len(set(texts))

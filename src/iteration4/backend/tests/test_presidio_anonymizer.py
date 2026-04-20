@@ -1,9 +1,21 @@
-from app.services.presidio_anonymizer import anonymize_history_for_llm, anonymize_text_for_llm
+from app.services.presidio_anonymizer import (
+    DEFAULT_PII_ENTITIES,
+    anonymize_history_for_llm,
+    anonymize_text_for_llm,
+    count_anonymized_replacements,
+)
 
 
 class DummyResult:
     def __init__(self, text: str):
         self.text = text
+
+
+class DummyRecognizerResult:
+    def __init__(self, entity_type: str, start: int, end: int):
+        self.entity_type = entity_type
+        self.start = start
+        self.end = end
 
 
 class DummyAnalyzer:
@@ -15,7 +27,7 @@ class DummyAnalyzer:
         if self.raise_error:
             raise RuntimeError("analyzer failed")
         if self.has_pii:
-            return [{"entity_type": "PHONE_NUMBER", "start": 8, "end": 18}]
+            return [DummyRecognizerResult(entity_type="PHONE_NUMBER", start=8, end=18)]
         return []
 
 
@@ -82,3 +94,16 @@ def test_anonymize_text_for_llm_fallback_name_redaction_when_analyzer_missing():
 
     assert "advait" not in result.lower()
     assert "<PERSON>" in result
+
+
+def test_count_anonymized_replacements_counts_regex_fallback_when_anonymizer_missing():
+    text = "hi my name is advait"
+
+    replacements = count_anonymized_replacements(text, analyzer=None, anonymizer=None)
+
+    assert replacements == 1
+
+
+def test_default_entities_use_supported_indian_aadhaar_spelling():
+    assert "IN_AADHAAR" in DEFAULT_PII_ENTITIES
+    assert "IN_AADHAR" not in DEFAULT_PII_ENTITIES
