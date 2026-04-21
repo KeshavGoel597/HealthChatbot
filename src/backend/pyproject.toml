@@ -1,0 +1,28 @@
+[project]
+name = "robert-backend"
+version = "0.1.0"
+description = "Backend for Robert AI Medical Assistant"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi",
+  "uvicorn[standard]",
+  "python-dotenv",
+  "python-multipart",
+  "google-genai",
+  "torch",
+  "transformers",
+  "accelerate",
+  "faiss-cpu",
+  "networkx",
+  "numpy",
+  "requests",
+  "pydantic",
+  "presidio-analyzer",
+  "presidio-anonymizer",
+  "ollama",
+  "pytest",
+  "pytest-asyncio"
+]
+
+[tool.uv]
+package = false
