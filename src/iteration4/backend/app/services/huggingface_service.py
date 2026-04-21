@@ -14,6 +14,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 import os
 import asyncio
 from dotenv import load_dotenv
+from app.services.torch_runtime import detect_torch_runtime
 
 from app.services.context_compaction import (
     build_llm_history,
@@ -43,6 +44,8 @@ class HuggingFaceService:
         self.model_name = "Qwen/Qwen2-0.5B-Instruct"
         self.tokenizer = None
         self.model = None
+        self.backend_name = "cpu"
+        self.device = torch.device("cpu")
 
     def _summarize_emr_context(self, raw_data: str) -> tuple[str, list]:
         return summarize_emr_context(raw_data)
@@ -51,13 +54,21 @@ class HuggingFaceService:
         if self.model is None:
             print(f"Loading {self.model_name}...")
             try:
+                backend_name, device, dtype, use_device_map_auto = detect_torch_runtime()
+                self.backend_name = backend_name
+                self.device = device
                 self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+                kwargs = {"torch_dtype": dtype}
+                if use_device_map_auto:
+                    kwargs["device_map"] = "auto"
+
                 self.model = AutoModelForCausalLM.from_pretrained(
                     self.model_name,
-                    device_map="auto",
-                    torch_dtype=torch.float16,
+                    **kwargs,
                 )
-                print(f"{self.model_name} loaded.")
+                if not use_device_map_auto:
+                    self.model.to(self.device)
+                print(f"{self.model_name} loaded on {self.backend_name}.")
             except Exception as e:
                 raise RuntimeError(
                     f"Failed to load model '{self.model_name}'. "
@@ -79,7 +90,7 @@ class HuggingFaceService:
 
     def _generate(self, prompt: str, max_new_tokens: int = 512) -> str:
         self._load_model()
-        inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
+        inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
         outputs = self.model.generate(**inputs, max_new_tokens=max_new_tokens)
         new_tokens = outputs[0][inputs.input_ids.shape[1]:]
         return self.tokenizer.decode(new_tokens, skip_special_tokens=True)

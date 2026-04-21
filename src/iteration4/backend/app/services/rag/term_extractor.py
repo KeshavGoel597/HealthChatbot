@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from app.services.torch_runtime import detect_torch_runtime
 
 
 @dataclass
@@ -146,14 +147,19 @@ class TermExtractor:
     """
 
     def __init__(self, model_name: str = _DEFAULT_MODEL):
+        backend_name, device, dtype, use_device_map_auto = detect_torch_runtime()
+        self.device = device
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        cuda = torch.cuda.is_available()
+        kwargs = {"torch_dtype": dtype}
+        if use_device_map_auto:
+            kwargs["device_map"] = "auto"
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            device_map="auto" if cuda else "cpu",
-            torch_dtype=torch.float16 if cuda else torch.float32,
+            **kwargs,
         )
-        print(f"[TermExtractor] Loaded {model_name} on {'GPU' if cuda else 'CPU'}")
+        if not use_device_map_auto:
+            self.model.to(self.device)
+        print(f"[TermExtractor] Loaded {model_name} on {backend_name.upper()}")
 
     def _infer(self, prompt: str) -> str:
         """Run one inference pass, return decoded response string."""
@@ -161,7 +167,7 @@ class TermExtractor:
         text = self.tokenizer.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True,
         )
-        inputs = self.tokenizer([text], return_tensors="pt").to(self.model.device)
+        inputs = self.tokenizer([text], return_tensors="pt").to(self.device)
         output_ids = self.model.generate(
             **inputs,
             max_new_tokens=80,

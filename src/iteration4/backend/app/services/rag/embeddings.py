@@ -12,6 +12,7 @@ import faiss
 import torch
 from transformers import AutoTokenizer, AutoModel
 from pathlib import Path
+from app.services.torch_runtime import detect_torch_runtime
 
 SAPBERT_MODEL = "cambridgeltl/SapBERT-from-PubMedBERT-fulltext"
 
@@ -61,11 +62,17 @@ class EmbeddingIndex:
             print(f"[EmbeddingIndex] Loaded {len(self.cui_names)} CUI names.")
 
         # --- Load SapBERT encoder ---
+        backend_name, device, _, _ = detect_torch_runtime()
+        self.device = device
         self.tokenizer = AutoTokenizer.from_pretrained(SAPBERT_MODEL)
         self.model = AutoModel.from_pretrained(SAPBERT_MODEL)
+        self.model.to(self.device)
         self.model.eval()
 
-        print(f"[EmbeddingIndex] Loaded {len(self.cui_list)} CUI embeddings, FAISS index ready.")
+        print(
+            f"[EmbeddingIndex] Loaded {len(self.cui_list)} CUI embeddings, "
+            f"SapBERT on {backend_name.upper()}, FAISS index ready."
+        )
 
     @staticmethod
     def _resolve_vocab_path(embedding_path: Path, vocab_path: str | None) -> Path | None:
@@ -93,9 +100,10 @@ class EmbeddingIndex:
         """
         text = text.lower().strip()
         tokens = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=256)
+        tokens = {k: v.to(self.device) for k, v in tokens.items()}
         with torch.no_grad():
             output = self.model(**tokens)
-        vec = output.pooler_output.squeeze().numpy().astype(np.float32)
+        vec = output.pooler_output.squeeze().detach().cpu().numpy().astype(np.float32)
 
         # Normalize
         norm = np.linalg.norm(vec)
