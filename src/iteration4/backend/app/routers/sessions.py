@@ -31,7 +31,7 @@ from app.services.safety import check_safety
 import os
 import uuid
 from app.services.sarvam_service import SarvamService
-from app.services.medgemma_service import MedGemmaService
+from app.services.ollama_service import OllamaService
 from app.services.context_compaction import RETENTION_DAYS
 from datetime import datetime, timedelta
 from typing import List, Optional
@@ -41,8 +41,8 @@ sarvam_service = SarvamService()
 from functools import lru_cache
 
 @lru_cache(maxsize=1)
-def get_medgemma_service():
-    return MedGemmaService()
+def get_ollama_service():
+    return OllamaService()
 
 router = APIRouter()
 
@@ -261,11 +261,11 @@ async def send_message(session_id: str, request: ChatMessage, req: Request):
         presidio_anonymizer = getattr(req.app.state, "presidio_anonymizer", None)
 
         use_gemini = False
-        use_medgemma = False
+        use_ollama = False
         if request.model and request.model.startswith("gemini"):
             use_gemini = True
-        elif request.model and request.model == "medgemma":
-            use_medgemma = True
+        elif request.model and request.model in ("ollama", "medgemma"):
+            use_ollama = True
 
         # Translation (Input)
         target_lang = request.language or "en-IN"
@@ -295,8 +295,8 @@ async def send_message(session_id: str, request: ChatMessage, req: Request):
                 presidio_analyzer=presidio_analyzer,
                 presidio_anonymizer=presidio_anonymizer,
             )
-        elif use_medgemma:
-            service = get_medgemma_service()
+        elif use_ollama:
+            service = get_ollama_service()
             result = await service.chat(
                 llm_input_message,
                 session.patient_id,

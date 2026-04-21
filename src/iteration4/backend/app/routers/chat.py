@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Request
 from app.models.chat_models import ChatMessage, ChatResponse
 from app.services.gemini_service import GeminiService
 from app.services.huggingface_service import HuggingFaceService
-from app.services.medgemma_service import MedGemmaService
+from app.services.ollama_service import OllamaService
 from app.services.rag.pipeline import run_pipeline
 from app.services.safety import check_safety
 
@@ -13,8 +13,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 gemini_service = GeminiService()
-# MedGemma is an API client for Ollama, so it doesn't need lazy loading like HF
-medgemma_service = MedGemmaService()
+# Ollama is an API client, so it doesn't need lazy loading like HF
+ollama_service = OllamaService()
 
 # Lazy init for HF service to avoid loading 8GB on startup if not used
 @lru_cache(maxsize=1)
@@ -74,12 +74,11 @@ async def chat_endpoint(request: ChatMessage, req: Request):
         presidio_analyzer = getattr(req.app.state, "presidio_analyzer", None)
         presidio_anonymizer = getattr(req.app.state, "presidio_anonymizer", None)
 
-        # 4. Route to Local MedGemma, Gemini, or HuggingFace
+        # 4. Route to local Ollama, Gemini, or HuggingFace
         model_selection = request.model.lower() if request.model else "huggingface"
 
-        if "medgemma" in model_selection:
-            # Connects to your local Ollama instance on your Mac
-            llm_result = await medgemma_service.chat(
+        if model_selection in ("ollama", "medgemma"):
+            llm_result = await ollama_service.chat(
                 request.message, 
                 request.patient_id,
                 system_prompt=system_prompt,
