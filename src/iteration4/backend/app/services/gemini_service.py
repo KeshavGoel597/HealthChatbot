@@ -29,6 +29,7 @@ from app.services.presidio_anonymizer import (
     anonymize_text_for_llm,
     count_anonymized_replacements,
 )
+from app.services.emr_loader import load_patient_data
 
 load_dotenv()
 
@@ -71,19 +72,7 @@ class GeminiService:
         self.model_name = "gemini-2.5-flash-lite"
 
     def get_patient_data(self, patient_id: str) -> str:
-        base_dir = os.path.dirname(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        )
-        data_path = os.path.join(base_dir, "data", f"{patient_id}.json")
-
-        try:
-            with open(data_path, "r") as f:
-                return f.read()
-        except FileNotFoundError:
-            return "{}"
-        except Exception as e:
-            print(f"Error reading patient data: {e}")
-            return "{}"
+        return load_patient_data(patient_id)
 
     async def extract_clinical_data(self, raw_text: str) -> tuple[str, list]:
         """

@@ -11,7 +11,6 @@ RAG Integration:
 
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
-import os
 import asyncio
 from dotenv import load_dotenv
 from app.services.torch_runtime import detect_torch_runtime
@@ -22,6 +21,7 @@ from app.services.context_compaction import (
     split_for_compaction,
     compact_deterministic,
 )
+from app.services.emr_loader import load_patient_data
 from app.services.emr_summary import summarize_emr_context
 from app.services.presidio_anonymizer import anonymize_history_for_llm, anonymize_text_for_llm
 
@@ -76,17 +76,7 @@ class HuggingFaceService:
                 )
 
     def get_patient_data(self, patient_id: str) -> str:
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        data_path = os.path.join(base_dir, "data", f"{patient_id}.json")
-
-        try:
-            with open(data_path, "r") as f:
-                return f.read()
-        except FileNotFoundError:
-            return "{}"
-        except Exception as e:
-            print(f"Error reading patient data: {e}")
-            return "{}"
+        return load_patient_data(patient_id)
 
     def _generate(self, prompt: str, max_new_tokens: int = 512) -> str:
         self._load_model()

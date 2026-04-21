@@ -4,7 +4,6 @@ OllamaService — GDPR-compliant, context-compaction-aware
 Generic Ollama-backed chat service with MedGemma as the default model.
 """
 
-import os
 import asyncio
 import ollama
 from dotenv import load_dotenv
@@ -15,6 +14,7 @@ from app.services.context_compaction import (
     split_for_compaction,
     compact_deterministic,
 )
+from app.services.emr_loader import load_patient_data
 from app.services.emr_summary import summarize_emr_context
 from app.services.presidio_anonymizer import anonymize_history_for_llm, anonymize_text_for_llm
 
@@ -54,17 +54,7 @@ class OllamaService:
             )
 
     def get_patient_data(self, patient_id: str) -> str:
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        data_path = os.path.join(base_dir, "data", f"{patient_id}.json")
-
-        try:
-            with open(data_path, "r") as f:
-                return f.read()
-        except FileNotFoundError:
-            return "{}"
-        except Exception as e:
-            print(f"Error reading patient data: {e}")
-            return "{}"
+        return load_patient_data(patient_id)
 
     def _generate(self, messages: list, max_new_tokens: int = 512) -> str:
         """Generate text using the Ollama local API."""
