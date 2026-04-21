@@ -1,4 +1,4 @@
-# Robert Backend (FastAPI)
+# Backend (FastAPI)
 
 ## Description
 
@@ -29,13 +29,13 @@ It provides chat, session, GDPR, and transcription endpoints, and uses a SNOMED-
 - `GEMINI_API_KEY`
 - `SARVAM_API_KEY` (required for translation/TTS/STT features)
 
-## Data files (in `src/`, one level above `backend/`)
+## Data files (put in `src/`, one level above `backend/`)
 
 | File | Required | Purpose | Link |
-|---|---|---|
-| `GraphModel_SNOMED_CUI_Embedding.pkl` | Yes | SapBERT CUI embedding index. | [Link](https://drive.google.com/file/d/1a2axTk35wsvQ4AJOheZnjZJdyksHg1cy/view)
-| `SNOMED_CUI_MAJID_Graph_wSelf.pkl` | Yes | SNOMED knowledge graph. | [Link](https://drive.google.com/file/d/1zlb0zey_tAnFWtCY_NvhA0dqfydL4Ph7/view) 
-| `sm_t047_cui_aui_eng.pkl` | No | CUI -> names mapping. | [Link](https://drive.google.com/file/d/1xnZyz_ePAcXzmzCaqJHsAI0sf8LsG8DA/view)
+|---|---|---|---|
+| `GraphModel_SNOMED_CUI_Embedding.pkl` | Yes | SapBERT CUI embedding index. | [Link](https://drive.google.com/file/d/1a2axTk35wsvQ4AJOheZnjZJdyksHg1cy/view) |
+| `SNOMED_CUI_MAJID_Graph_wSelf.pkl` | Yes | SNOMED knowledge graph. | [Link](https://drive.google.com/file/d/1zlb0zey_tAnFWtCY_NvhA0dqfydL4Ph7/view) |
+| `sm_t047_cui_aui_eng.pkl` | No | CUI -> names mapping. | [Link](https://drive.google.com/file/d/1xnZyz_ePAcXzmzCaqJHsAI0sf8LsG8DA/view)|
 
 If required `.pkl` files are missing, startup fails while loading RAG resources.
 
