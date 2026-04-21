@@ -3,23 +3,14 @@ from functools import lru_cache
 
 from fastapi import APIRouter, HTTPException, Request
 from app.models.chat_models import ChatMessage, ChatResponse
-from app.services.gemini_service import GeminiService
-from app.services.huggingface_service import HuggingFaceService
-from app.services.ollama_service import OllamaService
+from app.services.llm_factory import get_llm_service
 from app.services.rag.pipeline import run_pipeline
 from app.services.safety import check_safety
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-gemini_service = GeminiService()
-# Ollama is an API client, so it doesn't need lazy loading like HF
-ollama_service = OllamaService()
 
-# Lazy init for HF service to avoid loading 8GB on startup if not used
-@lru_cache(maxsize=1)
-def get_hf_service():
-    return HuggingFaceService()
 
 
 def _get_emr_path(patient_id: str) -> str:
@@ -75,37 +66,15 @@ async def chat_endpoint(request: ChatMessage, req: Request):
         presidio_anonymizer = getattr(req.app.state, "presidio_anonymizer", None)
 
         # 4. Route to local Ollama, Gemini, or HuggingFace
-        model_selection = request.model.lower() if request.model else "huggingface"
-
-        if model_selection in ("ollama", "medgemma"):
-            llm_result = await ollama_service.chat(
-                request.message, 
-                request.patient_id,
-                system_prompt=system_prompt,
-                emr_consent=request.emr_consent,
-                presidio_analyzer=presidio_analyzer,
-                presidio_anonymizer=presidio_anonymizer,
-            )
-        elif "gemini" in model_selection:
-            llm_result = await gemini_service.chat(
-                request.message, 
-                request.patient_id,
-                system_prompt=system_prompt,
-                emr_consent=request.emr_consent,
-                presidio_analyzer=presidio_analyzer,
-                presidio_anonymizer=presidio_anonymizer,
-            )
-        else:
-            # Default to HuggingFace (loaded locally)
-            service = get_hf_service()
-            llm_result = await service.chat(
-                request.message, 
-                request.patient_id,
-                system_prompt=system_prompt,
-                emr_consent=request.emr_consent,
-                presidio_analyzer=presidio_analyzer,
-                presidio_anonymizer=presidio_anonymizer,
-            )
+        llm_service = get_llm_service(request.model)
+        llm_result = await llm_service.chat(
+            request.message, 
+            request.patient_id,
+            system_prompt=system_prompt,
+            emr_consent=request.emr_consent,
+            presidio_analyzer=presidio_analyzer,
+            presidio_anonymizer=presidio_anonymizer,
+        )
 
         return ChatResponse(**llm_result)
 
@@ -114,7 +83,7 @@ async def chat_endpoint(request: ChatMessage, req: Request):
             raise HTTPException(status_code=503, detail=str(e))
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
-        logger.error(f"Chat error: {e}")
+        logger.exception("Chat error")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/health")

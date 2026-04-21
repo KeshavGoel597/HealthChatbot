@@ -17,12 +17,15 @@ Context Compaction:
   If exceeded, older turns are summarised and replaced by a compact_summary block.
 """
 
+import logging
+
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
 import json
 from app.models.chat_models import (
     ChatSession, SessionMessage, ChatResponse, ChatMessage, SessionCreateRequest
 )
-from app.routers.chat import gemini_service, get_hf_service, _get_emr_path
+from app.routers.chat import _get_emr_path
+from app.services.llm_factory import get_llm_service
 from app.services.rag.pipeline import run_pipeline
 from app.services.session_store import (
     SESSIONS_DIR, get_session_path, load_session, save_session,
@@ -36,13 +39,11 @@ from app.services.context_compaction import RETENTION_DAYS
 from datetime import datetime, timedelta
 from typing import List, Optional
 
+from app.services.sarvam_service import SarvamService
+
 sarvam_service = SarvamService()
 
-from functools import lru_cache
-
-@lru_cache(maxsize=1)
-def get_ollama_service():
-    return OllamaService()
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -260,65 +261,18 @@ async def send_message(session_id: str, request: ChatMessage, req: Request):
         presidio_analyzer = getattr(req.app.state, "presidio_analyzer", None)
         presidio_anonymizer = getattr(req.app.state, "presidio_anonymizer", None)
 
-        use_gemini = False
-        use_ollama = False
-        if request.model and request.model.startswith("gemini"):
-            use_gemini = True
-        elif request.model and request.model in ("ollama", "medgemma"):
-            use_ollama = True
-
-        # Translation (Input)
-        target_lang = request.language or "en-IN"
-        llm_input_message = request.message
-
-        if target_lang != "en-IN":
-            print(f"Translating input from {target_lang} to en-IN...")
-            translated_input = sarvam_service.translate(request.message, target_lang, "en-IN")
-            if translated_input:
-                llm_input_message = translated_input
-
-        # Build raw history (exclude current user message — services add it separately)
-        raw_history_for_llm = [
-            {"role": m.role, "content": m.content}
-            for m in session.messages[:-1]
-        ]
-
-        # 4. Call the appropriate LLM service (all now accept compacted_summary + emr_consent + system_prompt)
-        if use_gemini:
-            result = await gemini_service.chat(
-                llm_input_message,
-                session.patient_id,
-                history=raw_history_for_llm,
-                compacted_summary=session.compacted_summary,
-                emr_consent=effective_emr_consent,
-                system_prompt=system_prompt,
-                presidio_analyzer=presidio_analyzer,
-                presidio_anonymizer=presidio_anonymizer,
-            )
-        elif use_ollama:
-            service = get_ollama_service()
-            result = await service.chat(
-                llm_input_message,
-                session.patient_id,
-                history=raw_history_for_llm,
-                compacted_summary=session.compacted_summary,
-                emr_consent=effective_emr_consent,
-                system_prompt=system_prompt,
-                presidio_analyzer=presidio_analyzer,
-                presidio_anonymizer=presidio_anonymizer,
-            )
-        else:
-            service = get_hf_service()
-            result = await service.chat(
-                llm_input_message,
-                session.patient_id,
-                history=raw_history_for_llm,
-                compacted_summary=session.compacted_summary,
-                emr_consent=effective_emr_consent,
-                system_prompt=system_prompt,
-                presidio_analyzer=presidio_analyzer,
-                presidio_anonymizer=presidio_anonymizer,
-            )
+        # 4. Call the appropriate LLM service
+        llm_service = get_llm_service(request.model)
+        result = await llm_service.chat(
+            llm_input_message,
+            session.patient_id,
+            history=raw_history_for_llm,
+            compacted_summary=session.compacted_summary,
+            emr_consent=effective_emr_consent,
+            system_prompt=system_prompt,
+            presidio_analyzer=presidio_analyzer,
+            presidio_anonymizer=presidio_anonymizer,
+        )
 
         # Translation (Output)
         final_response_text = result["response"]
@@ -374,6 +328,7 @@ async def send_message(session_id: str, request: ChatMessage, req: Request):
         return ChatResponse(**result)
 
     except Exception as e:
+        logger.exception("Session chat error")
         raise HTTPException(status_code=500, detail=str(e))
 
 
