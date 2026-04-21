@@ -4,7 +4,7 @@ from functools import lru_cache
 from fastapi import APIRouter, HTTPException, Request
 from app.models.chat_models import ChatMessage, ChatResponse
 from app.services.llm_factory import get_llm_service
-from app.services.rag.pipeline import run_pipeline
+from app.services.rag_orchestrator import build_rag_system_prompt
 from app.services.safety import check_safety
 
 logger = logging.getLogger(__name__)
@@ -12,12 +12,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-
-def _get_emr_path(patient_id: str) -> str:
-    """Resolve patient EMR file path."""
-    import os
-    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    return os.path.join(base_dir, "data", f"{patient_id}.json")
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -39,23 +33,12 @@ async def chat_endpoint(request: ChatMessage, req: Request):
             )
 
         # 2. RAG Pipeline (Knowledge Graph + EMR Matching)
-        system_prompt = ""
-        if request.emr_consent:
-            index = req.app.state.embedding_index
-            graph = req.app.state.knowledge_graph
-            extractor = req.app.state.term_extractor
-            emr_path = _get_emr_path(request.patient_id)
-
-            # run_pipeline returns clinical context gathered from the Knowledge Graph
-            result = run_pipeline(
-                query=request.message,
-                emr_path=emr_path,
-                index=index,
-                graph=graph,
-                patient_id=request.patient_id,
-                extractor=extractor,
-            )
-            system_prompt = result.system_prompt
+        system_prompt, emr_fields_used_from_rag = build_rag_system_prompt(
+            req=req,
+            message=request.message,
+            patient_id=request.patient_id,
+            emr_consent=request.emr_consent,
+        )
 
         print("=== SYSTEM PROMPT SENT TO LLM ===", flush=True)
         print(system_prompt if system_prompt else "(empty — no consent or no EMR)", flush=True)
@@ -75,6 +58,10 @@ async def chat_endpoint(request: ChatMessage, req: Request):
             presidio_analyzer=presidio_analyzer,
             presidio_anonymizer=presidio_anonymizer,
         )
+
+        emr_fields_used = llm_result.get("emr_fields_used", [])
+        if emr_fields_used == ["RAG Pipeline (SNOMED Knowledge Graph)"] and emr_fields_used_from_rag:
+            llm_result["emr_fields_used"] = emr_fields_used_from_rag
 
         return ChatResponse(**llm_result)
 

@@ -24,9 +24,8 @@ import json
 from app.models.chat_models import (
     ChatSession, SessionMessage, ChatResponse, ChatMessage, SessionCreateRequest
 )
-from app.routers.chat import _get_emr_path
 from app.services.llm_factory import get_llm_service
-from app.services.rag.pipeline import run_pipeline
+from app.services.rag_orchestrator import build_rag_system_prompt
 from app.services.session_store import (
     SESSIONS_DIR, get_session_path, load_session, save_session,
 )
@@ -222,35 +221,12 @@ async def send_message(session_id: str, request: ChatMessage, req: Request):
         _save_session(session)
 
     # 2. Run RAG pipeline for focused context (only if EMR consent given)
-    system_prompt = ""
-    emr_fields_used_from_rag = []
-    if effective_emr_consent:
-        try:
-            index = req.app.state.embedding_index
-            graph = req.app.state.knowledge_graph
-            extractor = getattr(req.app.state, "term_extractor", None)
-            emr_path = _get_emr_path(session.patient_id)
-
-            pipeline_result = run_pipeline(
-                query=request.message,
-                emr_path=emr_path,
-                index=index,
-                graph=graph,
-                patient_id=session.patient_id,
-                extractor=extractor,
-            )
-            system_prompt = pipeline_result.system_prompt
-            
-            for match in pipeline_result.matches:
-                category = match.section.category.title()
-                if match.section.text:
-                    short_text = match.section.text[:50] + ("..." if len(match.section.text) > 50 else "")
-                    category += f" ({short_text})"
-                if category not in emr_fields_used_from_rag:
-                    emr_fields_used_from_rag.append(category)
-        except Exception as e:
-            print(f"RAG pipeline error: {e}")
-            system_prompt = ""
+    system_prompt, emr_fields_used_from_rag = build_rag_system_prompt(
+        req=req,
+        message=request.message,
+        patient_id=session.patient_id,
+        emr_consent=effective_emr_consent,
+    )
 
     print("=== SYSTEM PROMPT SENT TO LLM ===", flush=True)
     print(system_prompt if system_prompt else "(empty — no consent or no EMR)", flush=True)
