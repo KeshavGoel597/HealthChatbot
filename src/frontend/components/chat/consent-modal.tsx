@@ -132,7 +132,7 @@ export function ConsentModal({ onConsent }: ConsentModalProps) {
             {emrConsent || storeHistoryConsent ? "Save preferences and continue" : "Continue without data sharing"}
           </Button>
           <p className="text-[10px] text-center text-muted-foreground mt-3">
-            You can update these preferences at any time by starting a new conversation.
+            Your choices are saved in this browser and can be changed by clearing site data.
             GDPR Art. 7 — Consent may be withdrawn at any time.
           </p>
         </div>

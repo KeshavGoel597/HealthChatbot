@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Send, User, Bot, Loader2, Settings, PanelLeftClose, PanelLeftOpen, Languages, Volume2, FileText, ChevronDown, ChevronUp, AlertTriangle, Layers, Mic, MicOff } from 'lucide-react'
+import { Send, User, Bot, Loader2, Settings, PanelLeftClose, PanelLeftOpen, Languages, Volume2, FileText, ChevronDown, ChevronUp, Layers, Mic, MicOff } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,6 +20,43 @@ import { ConsentModal } from "@/components/chat/consent-modal"
 import ReactMarkdown from 'react-markdown'
 
 const BACKEND_URL = 'http://localhost:8013'
+const CONSENT_STORAGE_KEY = 'robert-chat-consent'
+
+type StoredConsent = {
+  accepted: boolean
+  emrConsent: boolean
+  storeHistoryConsent: boolean
+}
+
+const readStoredConsent = (): StoredConsent | null => {
+  if (typeof window === 'undefined') return null
+
+  try {
+    const rawValue = window.localStorage.getItem(CONSENT_STORAGE_KEY)
+    if (!rawValue) return null
+
+    const parsedValue = JSON.parse(rawValue) as Partial<StoredConsent>
+    if (parsedValue.accepted !== true) return null
+
+    return {
+      accepted: true,
+      emrConsent: Boolean(parsedValue.emrConsent),
+      storeHistoryConsent: Boolean(parsedValue.storeHistoryConsent),
+    }
+  } catch {
+    return null
+  }
+}
+
+const saveStoredConsent = (consent: StoredConsent) => {
+  if (typeof window === 'undefined') return
+
+  try {
+    window.localStorage.setItem(CONSENT_STORAGE_KEY, JSON.stringify(consent))
+  } catch {
+    // Ignore storage failures and fall back to in-memory consent for this session.
+  }
+}
 
 interface Message {
   role: 'user' | 'assistant'
@@ -53,7 +90,7 @@ const LANGUAGES = [
 
 export function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>([
-    { role: 'assistant', content: 'Hello! I am Robert, your AI medical assistant. Please review the privacy notice above before we begin.' }
+    { role: 'assistant', content: 'Hello! I am Robert, your AI medical assistant. How can I help you today?' }
   ])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -62,10 +99,11 @@ export function ChatInterface() {
   const scrollAreaRef = useRef<HTMLDivElement>(null)
 
   // GDPR consent state
-  const [showConsentModal, setShowConsentModal] = useState(true)
+  const [showConsentModal, setShowConsentModal] = useState(false)
   const [emrConsent, setEmrConsent] = useState(false)
   const [storeHistoryConsent, setStoreHistoryConsent] = useState(false)
   const [consentGiven, setConsentGiven] = useState(false)
+  const [hasSavedConsent, setHasSavedConsent] = useState(false)
 
   // Voice input state
   const [isRecording, setIsRecording] = useState(false)
@@ -84,6 +122,21 @@ export function ChatInterface() {
   // Fetch sessions on mount
   useEffect(() => {
     fetchSessions()
+  }, [])
+
+  useEffect(() => {
+    const storedConsent = readStoredConsent()
+
+    if (storedConsent) {
+      setEmrConsent(storedConsent.emrConsent)
+      setStoreHistoryConsent(storedConsent.storeHistoryConsent)
+      setConsentGiven(true)
+      setHasSavedConsent(true)
+      setShowConsentModal(false)
+      return
+    }
+
+    setShowConsentModal(true)
   }, [])
 
   // Auto-scroll to bottom
@@ -112,7 +165,13 @@ export function ChatInterface() {
     setEmrConsent(emr)
     setStoreHistoryConsent(storeHistory)
     setConsentGiven(true)
+    setHasSavedConsent(true)
     setShowConsentModal(false)
+    saveStoredConsent({
+      accepted: true,
+      emrConsent: emr,
+      storeHistoryConsent: storeHistory,
+    })
   }
 
   const handleNewChat = () => {
@@ -121,9 +180,8 @@ export function ChatInterface() {
       { role: 'assistant', content: 'Hello! I am Robert, your AI medical assistant. How can I help you today?' }
     ])
     setEvidencePanelOpen({})
-    // Re-show consent modal for new chat (fresh consent per session — GDPR Art. 7)
-    setShowConsentModal(true)
-    setConsentGiven(false)
+    setShowConsentModal(!hasSavedConsent)
+    setConsentGiven(hasSavedConsent)
     if (window.innerWidth < 1024) setIsSidebarOpen(false)
   }
 
@@ -291,7 +349,7 @@ export function ChatInterface() {
   return (
     <div className="flex h-full w-full bg-background overflow-hidden">
 
-      {/* GDPR Consent Modal — shown on first load and each new chat */}
+      {/* GDPR Consent Modal — shown until the notice has been accepted once */}
       {showConsentModal && <ConsentModal onConsent={handleConsent} />}
 
       <ChatSidebar
@@ -371,19 +429,6 @@ export function ChatInterface() {
             <ModeToggle />
           </div>
         </header>
-
-        {/* GDPR AI Disclaimer Banner — Art. 5(1)(a) + Art. 22 */}
-        <div className="flex items-center gap-2 bg-amber-500/8 border-b border-amber-500/20 px-4 py-1.5 text-xs text-amber-700 dark:text-amber-400">
-          <AlertTriangle className="h-3 w-3 shrink-0" />
-          <span>
-            <strong>Robert is an AI assistant</strong> — not a licensed physician. Always verify medical
-            information with a qualified healthcare professional before acting.
-            {emrConsent
-              ? <span className="ml-1 text-amber-600/80 dark:text-amber-400/60">· EMR access: <strong>on</strong></span>
-              : <span className="ml-1 text-amber-600/80 dark:text-amber-400/60">· EMR access: <strong>off</strong></span>
-            }
-          </span>
-        </div>
 
         {/* Main Chat Area */}
         <div className="flex-1 overflow-hidden relative">

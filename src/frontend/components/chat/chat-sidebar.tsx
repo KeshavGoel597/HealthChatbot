@@ -146,10 +146,6 @@ export function ChatSidebar({
           <div className="h-2 w-2 rounded-full bg-green-500" />
           <span>Online</span>
         </div>
-        <p className="text-[9px] text-muted-foreground/50 px-2 leading-relaxed">
-          Chats auto-deleted after 30 days (GDPR Art. 5(1)(e)).
-          Delete any time via 🗑 icon.
-        </p>
       </div>
     </div>
   )
