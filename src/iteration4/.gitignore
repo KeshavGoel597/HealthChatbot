@@ -1,4 +1,0 @@
-.venv
-.direnv/
-backend/.env
-backend/data/sessions
