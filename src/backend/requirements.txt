@@ -10,7 +10,10 @@ networkx
 numpy
 requests
 pydantic
+python-multipart
 presidio-analyzer
 presidio-anonymizer
 ollama
 bitsandbytes
+pytest
+pytest-asyncio

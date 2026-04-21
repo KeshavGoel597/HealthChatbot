@@ -2,7 +2,7 @@
 import numpy as np
 import os
 import pytest
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 from app.services.rag.term_extractor import ExtractionResult
 
@@ -72,8 +72,8 @@ def client(tmp_path, monkeypatch):
         text_to_speech=lambda *a, **kw: None,
     ))
 
-    # Patch GeminiService.chat so no real API calls are made
-    async def _fake_chat(*a, **kw):
+    # Patch shared orchestration function imported by routers.
+    async def _fake_run_llm_turn(*a, **kw):
         return {
             "response": "Mocked LLM response.",
             "input_tokens": 10,
@@ -85,17 +85,8 @@ def client(tmp_path, monkeypatch):
             "new_compacted_summary": None,
         }
 
-    monkeypatch.setattr("app.routers.chat.gemini_service.chat", _fake_chat)
-    monkeypatch.setattr("app.routers.sessions.gemini_service.chat", _fake_chat)
-
-    # Patch run_pipeline to avoid needing real EMR files
-    fake_pipeline = MagicMock(system_prompt="")
-    monkeypatch.setattr(
-        "app.routers.sessions.run_pipeline", lambda **kw: fake_pipeline
-    )
-    monkeypatch.setattr(
-        "app.routers.chat.run_pipeline", lambda **kw: fake_pipeline
-    )
+    monkeypatch.setattr("app.routers.chat.run_llm_turn", _fake_run_llm_turn)
+    monkeypatch.setattr("app.routers.sessions.run_llm_turn", _fake_run_llm_turn)
 
     from app.main import app
     with TestClient(app) as c:

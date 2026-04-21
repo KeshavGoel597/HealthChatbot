@@ -20,12 +20,10 @@ Context Compaction:
 import logging
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
-import json
 from app.models.chat_models import (
     ChatSession, SessionMessage, ChatResponse, ChatMessage, SessionCreateRequest
 )
-from app.services.llm_factory import get_llm_service
-from app.services.rag_orchestrator import build_rag_system_prompt
+from app.services.chat_orchestrator import run_llm_turn
 from app.services.session_store import (
     SESSIONS_DIR, get_session_path, load_session, save_session,
 )
@@ -33,12 +31,9 @@ from app.services.safety import check_safety
 import os
 import uuid
 from app.services.sarvam_service import SarvamService
-from app.services.ollama_service import OllamaService
 from app.services.context_compaction import RETENTION_DAYS
 from datetime import datetime, timedelta
 from typing import List, Optional
-
-from app.services.sarvam_service import SarvamService
 
 sarvam_service = SarvamService()
 
@@ -220,34 +215,24 @@ async def send_message(session_id: str, request: ChatMessage, req: Request):
     if effective_history_consent:
         _save_session(session)
 
-    # 2. Run RAG pipeline for focused context (only if EMR consent given)
-    system_prompt, emr_fields_used_from_rag = build_rag_system_prompt(
-        req=req,
-        message=request.message,
-        patient_id=session.patient_id,
-        emr_consent=effective_emr_consent,
-    )
+    # Build normalized inputs for provider call.
+    target_lang = request.language or "en-IN"
+    llm_input_message = request.message
+    raw_history_for_llm = [
+        {"role": msg.role, "content": msg.content}
+        for msg in session.messages[:-1]
+    ]
 
-    print("=== SYSTEM PROMPT SENT TO LLM ===", flush=True)
-    print(system_prompt if system_prompt else "(empty — no consent or no EMR)", flush=True)
-    print("=== END SYSTEM PROMPT ===", flush=True)
-
-    # 3. Call LLM
+    # 2. Call shared orchestration (RAG + anonymization + provider call)
     try:
-        presidio_analyzer = getattr(req.app.state, "presidio_analyzer", None)
-        presidio_anonymizer = getattr(req.app.state, "presidio_anonymizer", None)
-
-        # 4. Call the appropriate LLM service
-        llm_service = get_llm_service(request.model)
-        result = await llm_service.chat(
-            llm_input_message,
-            session.patient_id,
+        result = await run_llm_turn(
+            req=req,
+            message=llm_input_message,
+            patient_id=session.patient_id,
+            model_name=request.model,
+            emr_consent=effective_emr_consent,
             history=raw_history_for_llm,
             compacted_summary=session.compacted_summary,
-            emr_consent=effective_emr_consent,
-            system_prompt=system_prompt,
-            presidio_analyzer=presidio_analyzer,
-            presidio_anonymizer=presidio_anonymizer,
         )
 
         # Translation (Output)
@@ -271,8 +256,6 @@ async def send_message(session_id: str, request: ChatMessage, req: Request):
 
         # 6. Add assistant message with emr_fields_used for GDPR Art. 15
         emr_fields_used = result.get("emr_fields_used", [])
-        if emr_fields_used == ["RAG Pipeline (SNOMED Knowledge Graph)"] and emr_fields_used_from_rag:
-            emr_fields_used = emr_fields_used_from_rag
 
         assistant_msg = SessionMessage(
             role="assistant",

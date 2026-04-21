@@ -25,11 +25,10 @@ from app.services.context_compaction import (
     compact_with_gemini,
 )
 from app.services.presidio_anonymizer import (
-    anonymize_history_for_llm,
-    anonymize_text_for_llm,
     count_anonymized_replacements,
 )
 from app.services.emr_loader import load_patient_data
+from app.services.llm_base import BaseLLMService
 
 load_dotenv()
 
@@ -62,7 +61,7 @@ def build_emr_system_prompt(clinical_context: str) -> str:
     )
 
 
-class GeminiService:
+class GeminiService(BaseLLMService):
     def __init__(self):
         self.api_key = os.getenv("GEMINI_API_KEY")
         if not self.api_key:
@@ -211,20 +210,12 @@ class GeminiService:
             f"{GDPR_RESPONSE_DISCLAIMER}"
         )
 
-        sanitized_system_instruction_text = anonymize_text_for_llm(
-            system_instruction_text,
-            presidio_analyzer,
-            presidio_anonymizer,
-        )
-        sanitized_history_for_llm = anonymize_history_for_llm(
-            history_for_llm,
-            presidio_analyzer,
-            presidio_anonymizer,
-        )
-        sanitized_message = anonymize_text_for_llm(
-            message,
-            presidio_analyzer,
-            presidio_anonymizer,
+        sanitized_system_instruction_text, sanitized_history_for_llm, sanitized_message = self._anonymize_for_llm(
+            system_content=system_instruction_text,
+            history_for_llm=history_for_llm,
+            message=message,
+            presidio_analyzer=presidio_analyzer,
+            presidio_anonymizer=presidio_anonymizer,
         )
 
         print("=== OUTBOUND LLM DEBUG (Gemini) ===", flush=True)

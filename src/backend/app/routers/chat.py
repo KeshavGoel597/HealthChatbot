@@ -1,10 +1,8 @@
 import logging
-from functools import lru_cache
 
 from fastapi import APIRouter, HTTPException, Request
 from app.models.chat_models import ChatMessage, ChatResponse
-from app.services.llm_factory import get_llm_service
-from app.services.rag_orchestrator import build_rag_system_prompt
+from app.services.chat_orchestrator import run_llm_turn
 from app.services.safety import check_safety
 
 logger = logging.getLogger(__name__)
@@ -32,36 +30,14 @@ async def chat_endpoint(request: ChatMessage, req: Request):
                 was_compacted=False,
             )
 
-        # 2. RAG Pipeline (Knowledge Graph + EMR Matching)
-        system_prompt, emr_fields_used_from_rag = build_rag_system_prompt(
+        # 2. Shared orchestration (RAG + anonymization + provider call)
+        llm_result = await run_llm_turn(
             req=req,
             message=request.message,
             patient_id=request.patient_id,
-            emr_consent=request.emr_consent,
+            model_name=request.model,
+            emr_consent=bool(request.emr_consent),
         )
-
-        print("=== SYSTEM PROMPT SENT TO LLM ===", flush=True)
-        print(system_prompt if system_prompt else "(empty — no consent or no EMR)", flush=True)
-        print("=== END SYSTEM PROMPT ===", flush=True)
-
-        # 3. Privacy Anonymization Tools
-        presidio_analyzer = getattr(req.app.state, "presidio_analyzer", None)
-        presidio_anonymizer = getattr(req.app.state, "presidio_anonymizer", None)
-
-        # 4. Route to local Ollama, Gemini, or HuggingFace
-        llm_service = get_llm_service(request.model)
-        llm_result = await llm_service.chat(
-            request.message, 
-            request.patient_id,
-            system_prompt=system_prompt,
-            emr_consent=request.emr_consent,
-            presidio_analyzer=presidio_analyzer,
-            presidio_anonymizer=presidio_anonymizer,
-        )
-
-        emr_fields_used = llm_result.get("emr_fields_used", [])
-        if emr_fields_used == ["RAG Pipeline (SNOMED Knowledge Graph)"] and emr_fields_used_from_rag:
-            llm_result["emr_fields_used"] = emr_fields_used_from_rag
 
         return ChatResponse(**llm_result)
 
