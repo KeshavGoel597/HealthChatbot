@@ -322,6 +322,13 @@ async def send_message(session_id: str, request: ChatMessage, req: Request):
 
         # Translation (Output)
         final_response_text = result["response"]
+        
+        # Strip Presidio anonymization tags like <PERSON> so TTS/Translation don't process them literally
+        import re
+        final_response_text = re.sub(r'<[A-Z_]+>', '', final_response_text)
+        final_response_text = re.sub(r'\s+', ' ', final_response_text).strip()
+        final_response_text = final_response_text.replace(" ,", ",").replace(" .", ".")
+
         audio_content = None
 
         if target_lang != "en-IN":
