@@ -25,7 +25,8 @@ class EmbeddingIndex:
         Args:
             embedding_path: Path to GraphModel_SNOMED_CUI_Embedding.pkl
                             Dict[str, ndarray(1, 768)]
-            vocab_path:     Path to CUI_Vocab.json (pickle format).
+            vocab_path:     Path to a CUI vocabulary pickle.
+                            Supports CUI_Vocab.json and sm_t047_cui_aui_eng.pkl.
                             Dict[str, list[[aui_id, preferred_text], ...]]
                             If None, auto-detects next to embedding_path.
         """
@@ -76,11 +77,16 @@ class EmbeddingIndex:
 
     @staticmethod
     def _resolve_vocab_path(embedding_path: Path, vocab_path: str | None) -> Path | None:
-        """Find CUI_Vocab.json next to the embedding file if not specified."""
+        """Find a supported CUI vocab file next to the embedding file if not specified."""
         if vocab_path:
             return Path(vocab_path)
-        candidate = embedding_path.parent / "CUI_Vocab.json"
-        return candidate if candidate.exists() else None
+
+        # Backward-compatible priority order.
+        for name in ("CUI_Vocab.json", "sm_t047_cui_aui_eng.pkl"):
+            candidate = embedding_path.parent / name
+            if candidate.exists():
+                return candidate
+        return None
 
     def get_name(self, cui: str) -> str:
         """Return human-readable name for a CUI, or the CUI itself if unknown."""

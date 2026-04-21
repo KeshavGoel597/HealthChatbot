@@ -5,6 +5,8 @@ CLI for full RAG pipeline: Query → Seed CUIs → Graph Expansion → EMR Retri
 Usage:
     python -m app.cli.emr_retrieve "my head hurts" --emr ../backend/data/patient101.json
     python -m app.cli.emr_retrieve "diabetes and blood sugar" --emr data/patient101.json
+    python -m app.cli.emr_retrieve --interactive --emr data/patient101.json
+    python -m app.cli.emr_retrieve "headache" --emr data/patient101.json --hide-prompt
 """
 
 import argparse
@@ -150,9 +152,12 @@ Examples:
   %(prog)s "my head hurts" --emr data/patient101.json
   %(prog)s "diabetes and blood sugar" --emr data/patient102.json
   %(prog)s "kidney function" --emr data/patient101.json --match-threshold 0.3
+    %(prog)s --interactive --emr data/patient101.json
+    %(prog)s "headache" --emr data/patient101.json --hide-prompt
         """,
     )
-    parser.add_argument("query", help="Natural language query")
+    parser.add_argument("query", nargs="?", default=None, help="Natural language query")
+    parser.add_argument("-i", "--interactive", action="store_true", help="Interactive mode: keep entering queries")
     parser.add_argument("--emr", required=True, help="Path to patient EMR JSON file")
 
     # Phase 1 params
@@ -169,7 +174,8 @@ Examples:
     parser.add_argument("--dedup", action="store_true", default=True, help="Deduplicate EMR sections (default: on)")
 
     # Phase 4 params
-    parser.add_argument("--show-prompt", action="store_true", help="Show the assembled LLM prompt")
+    parser.add_argument("--show-prompt", dest="show_prompt", action="store_true", default=True, help="Show the assembled LLM prompt (default: on)")
+    parser.add_argument("--hide-prompt", dest="show_prompt", action="store_false", help="Hide the assembled LLM prompt")
 
     # Resource paths
     parser.add_argument("--embeddings", type=str, default=None)
@@ -178,27 +184,13 @@ Examples:
     return parser.parse_args()
 
 
-def main() -> None:
-    args = parse_args()
+def run_query(query: str, args: argparse.Namespace, index: EmbeddingIndex, graph: KnowledgeGraph, extractor: TermExtractor) -> None:
     t_total = time.time()
-
-    # ── Load resources ──
-    print(f"\n  {C.DIM}Loading resources...{C.RESET}")
-    t0 = time.time()
-
-    emb_path = args.embeddings or _default_path("GraphModel_SNOMED_CUI_Embedding.pkl")
-    graph_path = args.graph or _default_path("SNOMED_CUI_MAJID_Graph_wSelf.pkl")
-
-    index = EmbeddingIndex(emb_path)
-    graph = KnowledgeGraph(graph_path)
-    extractor = TermExtractor()
-
-    print(f"  {C.DIM}Resources loaded in {time.time() - t0:.1f}s{C.RESET}")
 
     # ── Run pipeline ──
     allowed = None if args.all_relations else DIAGNOSTIC_RELATIONS
     result = run_pipeline(
-        args.query,
+        query,
         args.emr,
         index,
         graph,
@@ -216,7 +208,7 @@ def main() -> None:
 
     # ── Display phases ──
     print_extraction(result.extraction)
-    print_phase1(args.query, result.seed_cuis)
+    print_phase1(query, result.seed_cuis)
     if result.expanded_cuis:
         print_phase2(result.expanded_cuis)
     print_phase3(result.matches, index.get_name)
@@ -228,7 +220,7 @@ def main() -> None:
         for line in result.system_prompt.split('\n'):
             print(f"  {C.WHITE}{line}{C.RESET}")
         print(f"  {C.DIM}{'─' * 60}{C.RESET}")
-        print(f"  {C.DIM}User message:{C.RESET}  {C.WHITE}\"{args.query}\"{C.RESET}")
+        print(f"  {C.DIM}User message:{C.RESET}  {C.WHITE}\"{query}\"{C.RESET}")
         print(f"  {C.DIM}{'─' * 60}{C.RESET}")
         print(f"  {C.DIM}Prompt length: {len(result.system_prompt)} chars{C.RESET}\n")
 
@@ -241,6 +233,46 @@ def main() -> None:
         f"{len(result.matches)}/{result.total_sections} EMR sections matched "
         f"[total: {total_ms / 1000:.1f}s]{C.RESET}\n"
     )
+
+
+def interactive_loop(args: argparse.Namespace, index: EmbeddingIndex, graph: KnowledgeGraph, extractor: TermExtractor) -> None:
+    print("\nInteractive mode - type a query and press Enter. 'quit' or Ctrl-C to exit.\n")
+    while True:
+        try:
+            query = input("query> ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print("\nBye.")
+            break
+        if not query or query.lower() in ("quit", "exit", "q"):
+            print("Bye.")
+            break
+        run_query(query, args, index, graph, extractor)
+
+
+def main() -> None:
+    args = parse_args()
+    if not args.query and not args.interactive:
+        print("Error: provide a query or use --interactive mode.\n")
+        sys.exit(1)
+
+    # ── Load resources once, then reuse in interactive mode ──
+    print(f"\n  {C.DIM}Loading resources...{C.RESET}")
+    t0 = time.time()
+
+    emb_path = args.embeddings or _default_path("GraphModel_SNOMED_CUI_Embedding.pkl")
+    graph_path = args.graph or _default_path("SNOMED_CUI_MAJID_Graph_wSelf.pkl")
+
+    index = EmbeddingIndex(emb_path)
+    graph = KnowledgeGraph(graph_path)
+    extractor = TermExtractor()
+
+    print(f"  {C.DIM}Resources loaded in {time.time() - t0:.1f}s{C.RESET}")
+
+    if args.interactive:
+        interactive_loop(args, index, graph, extractor)
+        return
+
+    run_query(args.query, args, index, graph, extractor)
 
 
 if __name__ == "__main__":
