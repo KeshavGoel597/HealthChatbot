@@ -1,87 +1,468 @@
+# Robert AI: Medical Assistant (DASS Spring 2026)
+
 [![Review Assignment Due Date](https://classroom.github.com/assets/deadline-readme-button-22041afd0340ce965d47ae6ef1cefeee28c7c493a6346c4f15d667ab976d596c.svg)](https://classroom.github.com/a/4T_GxXnv)
+
 [![Open in Visual Studio Code](https://classroom.github.com/assets/open-in-vscode-2e0aaae1b6195c2367325f4f02e2d04e9abb55f0b24a779b69b11b9e10269abc.svg)](https://classroom.github.com/online_ide?assignment_repo_id=22387623&assignment_repo_type=AssignmentRepo)
-# DASS Spring 2026 Template
 
-This template includes an Excel-based status tracker and an automated weekly snapshot workflow for submissions.
+---
 
-## Quick Start
-1. Create/update `docs/StatusTracker.xls` in Microsoft Excel (binary file; do not replace with CSV).
-2. Use these columns in row 1:
-   - Week
-   - Activity Name
-   - Type
-   - Responsible
-   - Est Hours
-   - Actual Hours
-   - Status
-3. Add weekly header rows (Week 1, Week 2, etc.) so students fill in below each header.
-4. Save the file in `docs/` and commit it.
+# Robert AI
 
-## Repository Layout
-- `.github/workflows/weekly-snapshot.yml` auto-creates weekly release snapshots.
-- `.github/workflows/snapshot-integrity.yml` detects tampering of past weekly snapshots.
-- `docs/StatusTracker.xls` Excel tracker (update weekly).
-- `docs/ProjectPlan.md` project plan template.
-- `docs/release-labels.txt` optional: add weekly labels/categories for TAs.
-- `docs/admin-setup.md` TA-only: required repo settings (tag protection).
-- `src/` project source code.
+Robert AI is an advanced AI-powered medical assistant built around a **SNOMED-grounded Retrieval-Augmented Generation (RAG) pipeline**.
 
-## Notes
-- `.gitattributes` marks `.xls/.xlsx` as binary to avoid noisy diffs.
-- `.gitignore` ignores Office temp files like `~$StatusTracker.xls`.
+The system leverages Electronic Medical Records (EMRs), medical knowledge graphs, and Large Language Models (LLMs) to provide context-aware and medically relevant responses while maintaining strong privacy and compliance guarantees.
 
-## Weekly submission integrity (anti-cheat)
+The project consists of:
 
-### What is enforced automatically
-Every Friday, GitHub Actions will:
+* **FastAPI Backend** for orchestration, retrieval, GDPR operations, and model integration.
+* **Next.js Frontend** for multilingual chat, voice interaction, and evidence visualization.
+* **SNOMED Knowledge Graph + SapBERT Retrieval Layer** for clinically grounded reasoning.
 
-1. **Require weekly activity**: `docs/StatusTracker.xls` and `docs/ProjectPlan.md` must have at least one commit in the current week window.
-2. **Create an immutable anchor**: an **annotated git tag** `submission-week-N` is created pointing to the repository state for that week.
-3. **Create a release** from that tag. The release body is exactly the annotated tag message.
-4. **Include a hash manifest**: the tag/release body includes sha256 hashes of every file under `src/` and `docs/`.
+---
 
-If any check fails, the weekly release/tag is **not created** (the workflow fails).
+# 🌟 Key Features
 
-### How teams add "labels/categories" without editing the Release
-Edit `docs/release-labels.txt`. Its contents are included in the tag annotation + release body.
+## SNOMED-Grounded RAG Pipeline
 
-### Allowing teams to add extra git tags
-Teams may create additional git tags (e.g., `milestone-1`) on their own commits.
-However, to prevent rewriting submission history, course admins should enable **Tag protection** for:
+* SapBERT-based concept retrieval
+* FAISS-powered CUI search
+* SNOMED knowledge graph expansion
+* EMR evidence retrieval and ranking
+* Context-aware prompt construction
 
-- `submission-week-*` (no deletions / force-updates)
+## Multi-Model LLM Support
 
-### Tamper detection
-Another workflow runs periodically to verify that for every `submission-week-*` tag:
+Supports multiple inference backends:
 
-- the GitHub Release body matches the annotated tag message (SHA256 check)
+* Gemini
+* Qwen
+* MedGemma (via Ollama)
 
-If a mismatch is found, it fails and opens a GitHub Issue as an audit trail.
+Allowing flexible deployment depending on latency, privacy, and cost requirements.
 
-> Note: GitHub cannot fully prevent cheating if students have full write access, but protected submission tags + hash manifests make manipulation difficult and highly detectable.
+## Voice & Multilingual Capabilities
 
-## Process Integrity Safeguards (TA Use)
-Use these interventions to discourage fabrication and enforce process adherence.
+Integrated with Sarvam AI for:
 
-### Tier 1: Soft Intervention (Mentorship)
-- Observer Effect Warning: reference a specific tracker data point to signal review.
-  Script: "I noticed in your tracker that Task A took exactly 4.0 hours and Task B took exactly 4.0 hours. Real development usually has more variation (e.g., 3.5 or 4.25). Please ensure you are logging actual clock times, not rough estimates."
-- Git History Trap: if commits show batching, ask for proof tied to the stated day.
-  Script: "Your tracker says you finished the API setup on Tuesday. Can you show me the git commit hash corresponding to that specific task on Tuesday?"
+* Speech-to-Text (STT)
+* Text-to-Speech (TTS)
+* Translation
+* Multilingual interaction
 
-### Tier 2: Hard Intervention (Grading Penalty)
-- Variance Check: if variance is suspiciously low (e.g., every entry is 2 hours), deduct 10-20% of the weekly process grade for Data Quality.
-  Justification: "Data Quality. The logs provided lack statistical realism and appear smoothed. This is poor project management practice."
-- Friday Night Deduction: if the tracker was only touched right before the deadline, deduct 50% of the process grade for Lack of Continuous Integration.
-  Justification: "Agile requires iterative tracking. Batch-updating at the deadline defeats the purpose of the tracker."
+## GDPR Compliance & Privacy
 
-### Tier 3: Formal Integrity Violation
-- Forensic Audit: if the tracker claims work with no code changes in `src/`, conduct a Viva audit.
-  Action: open GitHub Insights (Network graph) live, overlay tracker claims, and ask for the corresponding code.
-  Outcome: if no code exists for claimed work, report Academic Dishonesty to the course professor.
+Built-in support for:
 
-## Policy Text for Course Handout
-- Integrity of Project Artifacts: The `StatusTracker.xls` is a living document, not a homework assignment. It must reflect the actual state of development.
-- Batch Updates: Updating logs retroactively for multiple days/weeks is considered a failure of process adherence.
-- Fabrication: Logging hours for work not supported by version control evidence (git commits) constitutes academic dishonesty and will result in a grade of zero for that module.
-- Verification: Teaching staff reserve the right to audit tracker data against commit timestamps and variance analysis.
+* Article 15 (Access & Transparency)
+* Article 17 (Right to be Forgotten)
+* Session deletion
+* Evidence timelines
+* Patient data protection
+
+## Evidence Transparency
+
+The frontend explicitly displays:
+
+* Retrieved evidence
+* Supporting EMR fields
+* Reasoning context
+
+allowing users to understand how responses were generated.
+
+---
+
+# 🧠 RAG Architecture
+
+```text
+User Query
+      │
+      ▼
+SapBERT Encoding
+      │
+      ▼
+CUI Retrieval (FAISS)
+      │
+      ▼
+SNOMED Graph Expansion
+      │
+      ▼
+EMR Evidence Retrieval
+      │
+      ▼
+Prompt Assembly
+      │
+      ▼
+Gemini / Qwen / MedGemma
+      │
+      ▼
+Response + Evidence Panel
+```
+
+The retrieval layer uses SNOMED-grounded semantic search to identify clinically relevant concepts and evidence before generating a response.
+
+---
+
+# 🏗 Repository Layout
+
+```text
+.
+├── .github/
+│   └── workflows/
+│       ├── snapshot-integrity.yml
+│       └── ...
+│
+├── docs/
+│   ├── StatusTracker.xls
+│   ├── ProjectPlan/
+│   ├── MinutesOfMeetings/
+│   └── ...
+│
+├── src/
+│   ├── backend/
+│   │   ├── app/
+│   │   ├── data/
+│   │   └── ...
+│   │
+│   ├── frontend/
+│   │   ├── app/
+│   │   ├── components/
+│   │   └── ...
+│   │
+│   ├── GraphModel_SNOMED_CUI_Embedding.pkl
+│   ├── SNOMED_CUI_MAJID_Graph_wSelf.pkl
+│   └── sm_t047_cui_aui_eng.pkl
+│
+├── flake.nix
+├── .envrc
+└── README.md
+```
+
+---
+
+# 📂 Required Data Files
+
+To run the RAG pipeline locally, the following files must be placed directly inside the `src/` directory.
+
+| File                                  | Required | Purpose                     |
+| ------------------------------------- | -------- | --------------------------- |
+| `GraphModel_SNOMED_CUI_Embedding.pkl` | Yes      | SapBERT CUI embedding index |
+| `SNOMED_CUI_MAJID_Graph_wSelf.pkl`    | Yes      | SNOMED knowledge graph      |
+| `sm_t047_cui_aui_eng.pkl`             | Optional | CUI → concept name mapping  |
+
+Directory structure:
+
+```text
+src/
+├── GraphModel_SNOMED_CUI_Embedding.pkl
+├── SNOMED_CUI_MAJID_Graph_wSelf.pkl
+├── sm_t047_cui_aui_eng.pkl
+├── backend/
+└── frontend/
+```
+
+---
+
+# 🚀 Getting Started
+
+## 1. Backend Setup (FastAPI)
+
+### Prerequisites
+
+* Python 3.12+
+* uv (recommended)
+* Ollama (optional)
+
+### Configure Environment
+
+```bash
+cd src/backend
+
+cp .env.example .env
+```
+
+Add required API keys:
+
+```env
+GEMINI_API_KEY=<your-key>
+SARVAM_API_KEY=<your-key>
+```
+
+### Install Dependencies
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+uv sync --extra dev
+
+uv run python -m spacy download en_core_web_lg
+```
+
+### Optional: Local MedGemma via Ollama
+
+```bash
+ollama pull MedAIBase/MedGemma1.5:4b
+```
+
+### Run Backend
+
+```bash
+uv run uvicorn app.main:app \
+    --host 0.0.0.0 \
+    --port 8013 \
+    --reload
+```
+
+Backend URL:
+
+```text
+http://localhost:8013
+```
+
+### macOS Note
+
+If you encounter OpenMP runtime conflicts:
+
+```bash
+KMP_DUPLICATE_LIB_OK=TRUE \
+OMP_NUM_THREADS=1 \
+MKL_NUM_THREADS=1
+```
+
+---
+
+## 2. Frontend Setup (Next.js)
+
+### Prerequisites
+
+* Node.js 20+
+* npm or bun
+
+### Install Dependencies
+
+```bash
+cd src/frontend
+
+npm install
+```
+
+### Run Development Server
+
+```bash
+npm run dev
+```
+
+Frontend URL:
+
+```text
+http://localhost:3000/chat
+```
+
+---
+
+# 🛠 CLI Tools
+
+The backend includes utilities for testing and debugging the retrieval pipeline.
+
+Navigate to:
+
+```bash
+cd src/backend
+```
+
+## CUI Search
+
+```bash
+uv run python -m app.cli.cui_search \
+    "my head hurts" \
+    --show-terms
+```
+
+## Graph Expansion
+
+```bash
+uv run python -m app.cli.graph_expand \
+    "chest pain" \
+    --depth 1 \
+    --max-per-hop 20
+```
+
+## EMR Retrieval
+
+```bash
+uv run python -m app.cli.emr_retrieve \
+    "my head hurts" \
+    --emr data/patient101.json \
+    --show-prompt
+```
+
+---
+
+# 🧪 Testing
+
+Run backend tests:
+
+```bash
+uv run pytest -v
+```
+
+---
+
+# 🔒 GDPR & Privacy
+
+Robert AI is designed with privacy and compliance in mind.
+
+## Supported Features
+
+* GDPR Article 15 — Access & Transparency
+* GDPR Article 17 — Right to be Forgotten
+* Session deletion
+* Evidence timelines
+* Session auditability
+
+## PII Protection
+
+Patient-identifiable information should be anonymized before external model access.
+
+Supported mechanisms include:
+
+* Microsoft Presidio
+* Local PII detection
+* Evidence filtering
+* Secure session handling
+
+No patient-identifiable information should be transmitted to external services unless explicitly approved by deployment policies.
+
+---
+
+# 💡 Roadmap
+
+## 1. Dynamic Patient Authentication
+
+### Current State
+
+* Frontend currently uses a hardcoded patient identifier.
+
+### Future Work
+
+* Login system
+* Patient selection portal
+* React Context or Zustand-based state management
+
+---
+
+## 2. Frontend Proxy Routing
+
+### Current State
+
+Frontend components may directly reference backend URLs.
+
+### Future Work
+
+* Use Next.js rewrite rules
+* Remove CORS dependencies
+* Environment-specific backend routing
+
+---
+
+## 3. Containerization
+
+### Current State
+
+Services must be started manually.
+
+### Future Work
+
+* Dockerfiles
+* Docker Compose
+* One-command deployment
+
+---
+
+## 4. Database Migration
+
+### Current State
+
+EMRs and sessions are stored using local files.
+
+### Future Work
+
+* PostgreSQL
+* SQLAlchemy / SQLModel
+* Vector databases such as:
+
+  * Qdrant
+  * Milvus
+  * Pinecone
+
+---
+
+## 5. End-to-End Testing
+
+### Current State
+
+Backend testing exists through Pytest.
+
+### Future Work
+
+* Playwright
+* Cypress
+* Full user workflow testing
+
+---
+
+# 📚 Academic & Course Context
+
+This repository is built on top of the DASS Spring 2026 project template.
+
+## Status Tracker
+
+Weekly updates must be recorded in:
+
+```text
+docs/StatusTracker.xls
+```
+
+Do not convert the tracker to CSV format.
+
+---
+
+## Automated Snapshots
+
+Every Friday, GitHub Actions automatically:
+
+* Creates an immutable tag (`submission-week-N`)
+* Generates a release
+* Stores hash manifests for `src/` and `docs/`
+
+---
+
+## Process Integrity
+
+Automated integrity checks compare:
+
+* Weekly tracker entries
+* Git commit history
+
+Missing supporting commits may trigger an audit review.
+
+The integrity workflow is implemented in:
+
+```text
+.github/workflows/snapshot-integrity.yml
+```
+
+---
+
+# 👥 Authors
+
+Developed as part of the DASS Spring 2026 course project.
+
+Student Team:
+
+* Keshav
+* Vikesh
+* Advait
+* Amish
+* Venya
+
+---
