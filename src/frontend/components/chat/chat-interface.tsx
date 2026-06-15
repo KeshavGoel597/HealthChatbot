@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Send, User, Bot, Loader2, Settings, PanelLeftClose, PanelLeftOpen, Languages, Volume2, FileText, ChevronDown, ChevronUp, Layers, Mic, MicOff } from 'lucide-react'
+import { Send, User, Bot, Loader2, Settings, PanelLeftClose, PanelLeftOpen, Languages, Volume2, FileText, ChevronDown, ChevronUp, Layers, Mic, MicOff, Download } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -345,7 +345,22 @@ export function ChatInterface() {
   const toggleEvidencePanel = (index: number) => {
     setEvidencePanelOpen(prev => ({ ...prev, [index]: !prev[index] }))
   }
+  const exportChat = () => {
+    // Format the conversation into a readable text format
+    const chatText = messages.map(m => {
+      const sender = m.role === 'user' ? 'PATIENT' : 'ROBERT (AI)';
+      return `${sender}:\n${m.content}\n\n`;
+    }).join('');
 
+    // Create a Blob and trigger the download
+    const blob = new Blob([chatText], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Medical_Consultation_${new Date().toISOString().split('T')[0]}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
   return (
     <div className="flex h-full w-full bg-background overflow-hidden">
 
@@ -426,6 +441,15 @@ export function ChatInterface() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={exportChat}
+              title="Export Conversation"
+              disabled={messages.length <= 1} // Disabled if it's just the greeting
+            >
+              <Download className="h-4 w-4 text-muted-foreground" />
+            </Button>
             <ModeToggle />
           </div>
         </header>
@@ -560,9 +584,9 @@ export function ChatInterface() {
             <Input
               placeholder={
                 isRecording ? "Recording… click mic to stop"
-                : isTranscribing ? "Transcribing…"
-                : consentGiven ? "Message Robert…"
-                : "Please accept the privacy notice to begin…"
+                  : isTranscribing ? "Transcribing…"
+                    : consentGiven ? "Message Robert…"
+                      : "Please accept the privacy notice to begin…"
               }
               value={isRecording || isTranscribing ? "" : input}
               onChange={(e) => setInput(e.target.value)}
