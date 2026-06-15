@@ -19,7 +19,7 @@ import { ChatSidebar } from "@/components/chat/chat-sidebar"
 import { ConsentModal } from "@/components/chat/consent-modal"
 import ReactMarkdown from 'react-markdown'
 
-const BACKEND_URL = 'http://localhost:8013'
+const BACKEND_URL = "/api/python"
 const CONSENT_STORAGE_KEY = 'robert-chat-consent'
 
 type StoredConsent = {
